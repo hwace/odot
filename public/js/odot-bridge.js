@@ -1840,13 +1840,16 @@ function installShare() {
     const original = button.textContent;
     button.textContent = "이미지를 만드는 중…";
 
-    // 어디로 보낼지 고르는 창 없이 곧바로 인스타그램으로 넘어간다.
     const result = await shareToInstagram(month);
 
     button.disabled = false;
     button.textContent = original;
-    if (result === "success") toastSafe("이미지를 저장했어요. 인스타그램에서 골라 올려주세요.");
-    else toastSafe("공유 이미지를 만들지 못했어요. 다시 시도해 주세요.");
+
+    if (result === "success") toastSafe("인스타그램으로 보냈어요.");
+    else if (result === "cancelled") toastSafe("공유를 취소했어요.");
+    else if (result === "saved")
+      toastSafe("이미지를 저장했어요. 인스타그램에서 방금 저장한 사진을 골라주세요.");
+    else toastSafe("공유하지 못했어요. 다시 시도해 주세요.");
   };
 }
 

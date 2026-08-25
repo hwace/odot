@@ -398,46 +398,71 @@ export const odot = {
     }),
 };
 
+/** 공유 버튼이 실제로 어떻게 끝났는지 */
+export type ShareOutcome = "requested" | "success" | "cancelled" | "saved" | "failed";
+
 /**
  * 인스타그램 스토리로 보낸다.
  *
- * 버튼을 누르면 곧바로 인스타그램이 열린다 — 어디로 보낼지 고르는 창을 띄우지 않는다.
+ * **웹에서 다른 앱으로 파일을 넘기는 방법은 navigator.share({files}) 하나뿐이다.**
+ * 그래서 공유 시트를 띄운다 — 시트가 거추장스러워 보여도, 이미지가 인스타그램으로
+ * 건너가는 통로가 그것뿐이다. 시트를 없애면 앱만 열리고 사진은 전달되지 않는다.
+ * (instagram://story-camera 딥링크는 앱을 열 뿐 파일을 싣지 못한다.
+ *  파일까지 실으려면 Facebook SDK 를 쓰는 네이티브 앱이어야 한다.)
  *
- * 다만 **웹페이지가 인스타그램에 이미지를 직접 넘길 수는 없다.** 그건 앱끼리만
- * 가능한 일이라, 여기서는 이미지를 기기에 저장한 뒤 스토리 카메라를 연다.
- * 사용자는 인스타그램에서 방금 저장된 사진을 고르면 된다.
+ * 파일 공유를 지원하지 않는 브라우저에서는 이미지를 저장하고 인스타그램을 연다.
+ *
+ * 돌려주는 값: "success" 공유함 · "cancelled" 사용자가 닫음 ·
+ *              "saved" 저장 후 인스타그램 열림 · "failed" 실패
  */
-export async function shareToInstagram(month: string): Promise<ShareResult> {
-  let result: ShareResult = "requested";
+export async function shareToInstagram(month: string): Promise<ShareOutcome> {
+  let result: ShareOutcome = "requested";
   try {
     const blob = await odot.getShareImage(month);
+    const file = new File([blob], `odot-${month}.png`, { type: "image/png" });
 
-    // 1) 이미지를 기기에 저장한다.
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `odot-${month}.png`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-
-    // 2) 곧바로 인스타그램 스토리 카메라로 이동한다.
-    openInstagram();
-    result = "success";
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        result = "success";
+      } catch (err) {
+        // 사용자가 시트를 닫은 것은 실패가 아니다.
+        result = (err as Error)?.name === "AbortError" ? "cancelled" : "failed";
+      }
+    } else {
+      saveImage(blob, month);
+      openInstagram();
+      result = "saved";
+    }
   } catch {
     result = "failed";
   }
 
-  await odot.logShare(month, result).catch(() => undefined);
+  await odot.logShare(month, shareResultCode(result)).catch(() => undefined);
   return result;
 }
 
-/**
- * 인스타그램 앱을 연다. 앱이 없으면 잠시 뒤 웹으로 보낸다.
- * (딥링크는 앱이 없을 때 아무 일도 일어나지 않아서, 화면이 그대로면 실패로 본다)
- */
-function openInstagram() {
+/** 서버 기록은 정해진 값만 받는다. */
+function shareResultCode(result: ShareOutcome): ShareResult {
+  if (result === "success") return "success";
+  if (result === "saved") return "no_app";
+  if (result === "cancelled") return "requested";
+  return "failed";
+}
+
+function saveImage(blob: Blob, month: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `odot-${month}.png`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+/** 인스타그램 앱을 연다. 앱이 없으면 잠시 뒤 웹으로 보낸다. */
+function openInstagram(): void {
   const APP = "instagram://story-camera";
   const WEB = "https://www.instagram.com/";
 
@@ -445,7 +470,6 @@ function openInstagram() {
     if (!document.hidden) window.location.href = WEB;
   }, 1500);
 
-  // 앱으로 넘어가면 화면이 가려지므로 그때 취소한다.
   document.addEventListener(
     "visibilitychange",
     () => {
