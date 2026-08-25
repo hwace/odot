@@ -1,10 +1,14 @@
 node_modules
 .next
 out
-.env
-.env.local
-.env*.local
 next-env.d.ts
 tsconfig.tsbuildinfo
 .vercel
 .DS_Store
+
+# 실제 키가 들어가는 파일만 제외한다.
+# .env.example 은 템플릿이므로 커밋 대상이다 (아래 예외 규칙).
+.env
+.env.local
+.env*.local
+!.env.example
