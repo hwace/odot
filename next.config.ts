@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // 루트로 들어오면 앱 화면을 띄운다.
+  // 앱은 팀원 프로토타입(public/app.html)이라 Next 페이지가 아니다.
+  async redirects() {
+    return [{ source: "/", destination: "/app.html", permanent: false }];
+  },
+
   // 프론트엔드를 별도 오리진(예: Vite dev server)에서 띄울 경우를 대비한 CORS 허용.
   // 같은 Next 앱 안에서 쓸 때는 아무 영향이 없다.
   async headers() {
