@@ -48,6 +48,8 @@ const bridge = {
   projectId: null,
   /** 할 일까지 만든 프로젝트 (제목/설명/todo id 를 화면에 붙일 때 쓴다) */
   lastProject: null,
+  /** 프로토타입의 선택 키 → 실제 AI 목표 */
+  goalByKey: {},
   injectedCategoryNames: new Set(),
 };
 
@@ -626,18 +628,20 @@ function injectScreenStyles() {
     /* 카드가 차지할 공간이 늘었으니 덱을 위로 끌어올린다 */
     #explore .deck{margin-top:8px}
 
-    /* '내 답 찾기' → 오른쪽 위 화살표.
-       절대배치하면 '프로젝트 카드 N장' 과 겹치므로 흐름 안에 나란히 둔다. */
     #explore .topbar{display:flex;align-items:center;gap:8px}
     #explore .topbar .brand{margin-right:auto}
-    #decisionStart.odot-arrow{
-      position:static;flex:none;
-      width:38px;height:38px;padding:0;border:0;border-radius:50%;
-      background:var(--primary);color:#fff;font-size:0;line-height:0;
-      box-shadow:0 8px 18px #6e34cc38;cursor:pointer}
-    #decisionStart.odot-arrow:after{
-      content:"→";font-size:18px;line-height:38px;font-weight:800;display:block}
-    #decisionStart.odot-arrow[hidden]{display:none}
+
+    /* 목표 찾기 단계는 내용이 길다. 화면이 overflow:hidden 이라 그냥 두면
+       '프로젝트 만들기' 버튼이 화면 밖으로 잘린다. 안쪽에서 스크롤하고
+       버튼은 아래에 붙여 둔다. */
+    #explore.decision-mode #decisionFlow{
+      flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+      display:flex;flex-direction:column;padding-bottom:4px}
+    #explore.decision-mode #decisionGoals{flex:1;min-height:0}
+    #explore.decision-mode #decisionConfirm{
+      position:sticky;bottom:0;z-index:2;margin-top:10px}
+    #explore.decision-mode #decisionHelper{
+      position:sticky;bottom:0;z-index:2;background:var(--paper);margin:0;padding:6px 0 2px}
 
     /* 스크롤 없이 한 화면에 담기 (프로필 · 인사이트 제외)
        — 반드시 .active 까지 붙인다. 안 그러면 .screen{display:none} 을
@@ -695,31 +699,93 @@ function applyScreenFit(id) {
   });
 }
 
+/* ── 아래로 스와이프해서 목표 찾기 ────────────────────────────────── */
+
+/**
+ * 발견 화면에서 다음 단계로 넘어가는 버튼을 없애고, 카드를 **아래로 스와이프**하면
+ * 목표 찾기로 넘어가게 한다. 되돌리기 어려운 이동이라 확인 시트를 한 번 거친다.
+ *
+ * 프로토타입의 pointerup 핸들러는 addEventListener 로 걸려 있어 교체할 수 없다.
+ * 다행히 아래 방향(dy > 0)은 거기서 아무것도 하지 않으므로, 따로 listener 를
+ * 하나 더 달아도 충돌하지 않는다.
+ */
+
+const SWIPE_DOWN_DISTANCE = 110;
+const SWIPE_DOWN_MAX_DRIFT = 80;
+
+function installSwipeDown() {
+  const card = el("#activeCard");
+  if (!card || card.dataset.odotSwipeDown) return;
+  card.dataset.odotSwipeDown = "1";
+
+  let start = null;
+  card.addEventListener("pointerdown", (e) => {
+    start = { x: e.clientX, y: e.clientY };
+  });
+  card.addEventListener("pointerup", (e) => {
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    start = null;
+    if (dy > SWIPE_DOWN_DISTANCE && Math.abs(dx) < SWIPE_DOWN_MAX_DRIFT) {
+      askToFindGoal();
+    }
+  });
+  card.addEventListener("pointercancel", () => {
+    start = null;
+  });
+}
+
+/** 넘어가기 전에 한 번 확인받는다. */
+function askToFindGoal() {
+  const likes = Storage.read().reactions.filter((x) => x.type === "like").length;
+  if (likes < DECISION_MIN_LIKES) {
+    toastSafe(`관심 카드를 ${DECISION_MIN_LIKES - likes}장만 더 모아 주세요.`);
+    return;
+  }
+  ensureDecisionSheet();
+  el("#odotDecisionCount").textContent = `관심 카드 ${likes}장`;
+  openSheet("#odotDecisionSheet");
+}
+
+function ensureDecisionSheet() {
+  if (el("#odotDecisionSheet")) return;
+
+  const sheet = document.createElement("aside");
+  sheet.className = "sheet";
+  sheet.id = "odotDecisionSheet";
+  sheet.setAttribute("aria-hidden", "true");
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <p class="eyebrow" id="odotDecisionCount"></p>
+    <h2>이제 목표를 찾아볼까요?</h2>
+    <p>지금까지 모은 관심 카드로 나에게 맞는 목표를 찾아드려요.</p>
+    <button class="primary" id="odotDecisionGo" type="button">목표 찾기</button>
+    <button class="close" id="odotDecisionCancel" type="button">더 둘러볼래요</button>
+  `;
+  document.body.append(sheet);
+
+  el("#odotDecisionGo").onclick = () => {
+    closeSheets();
+    startDecision();
+  };
+  el("#odotDecisionCancel").onclick = () => closeSheets();
+}
+
 /* ── '내 답 찾기' 진입점 ───────────────────────────────────────────── */
 
 function installDecisionEntry() {
+  // 다음 단계로 넘어가는 버튼은 쓰지 않는다. 카드를 아래로 스와이프하면 된다.
   const button = el("#decisionStart");
-  const topbar = el("#explore .topbar");
-  if (!button || !topbar) return;
-
-  // 카드 아래에 있던 버튼을 상단 바 오른쪽으로 옮긴다.
-  button.classList.add("odot-arrow");
-  button.setAttribute("aria-label", "관심 카드로 내 답 찾기");
-  button.title = "내 답 찾기";
-  topbar.append(button);
-
-  updateDecisionEntry();
+  if (button) button.style.display = "none";
+  installSwipeDown();
 }
 
-/** 관심 카드가 기준을 넘을 때만 화살표를 보여준다. */
+/** 카드가 다시 그려질 때마다 스와이프 감지를 새 카드에 붙인다. */
 function updateDecisionEntry() {
   const button = el("#decisionStart");
-  if (!button) return;
-  // 결정 플로우가 열려 있을 때는 프로토타입 쪽이 감춘 상태를 유지한다.
-  if (el("#explore")?.classList.contains("decision-mode")) return;
-
-  const likes = Storage.read().reactions.filter((x) => x.type === "like").length;
-  button.hidden = likes < DECISION_MIN_LIKES;
+  if (button) button.style.display = "none";
+  installSwipeDown();
 }
 
 /* ── 결정 플로우 → 실제 할 일 후보군 ──────────────────────────────── */
@@ -773,6 +839,9 @@ async function fillRealGoals() {
   const sub = document.querySelector("#decisionFlow .flow-card .sub");
   const original = sub?.textContent;
   if (sub) sub.textContent = "관심 카드와 답변을 엮는 중이에요…";
+  // 후보가 도착하기 전에도 군더더기 문구는 미리 걷어낸다.
+  const kicker = document.querySelector("#decisionFlow .flow-kicker");
+  if (kicker) kicker.style.display = "none";
 
   try {
     // 프로토타입은 후보 칸을 카테고리별로 여러 개 그린다. 그 수만큼 받아 온다.
@@ -794,14 +863,34 @@ async function fillRealGoals() {
       const small = node.querySelector("small");
       if (strong) strong.textContent = goal.title;
       if (small) small.textContent = `${goal.horizon} · ${goal.why}`;
+      // 프로토타입은 선택값을 하드코딩 목록에서 가져온다.
+      // 화면에 보이는 실제 후보와 맞추기 위해 키로 연결해 둔다.
+      const key = `${node.dataset.category}:${node.dataset.goal}`;
+      bridge.goalByKey[key] = goal;
     });
 
     hideEmptyGoalGroups();
-    if (sub) sub.textContent = "관심 카드와 답변에서 뽑은 후보예요.";
+    stripGoalCopy();
   } catch (err) {
     if (sub) sub.textContent = original ?? "";
     toastSafe(messageOf(err));
   }
+}
+
+/**
+ * 목표 화면의 설명 문구를 걷어낸다.
+ * ("이번 프로젝트를 만드는 카드 N장" / "분야별 목표를 자유롭게 조합해요." /
+ *  후보 안내 한 줄) — 후보 목록 자체로 충분하다.
+ *
+ * 질문 단계에서는 같은 클래스가 질문문을 담고 있으므로 여기서만 지운다.
+ */
+function stripGoalCopy() {
+  for (const sel of ["#decisionFlow .flow-kicker", "#decisionFlow .flow-card h2", "#decisionFlow .flow-card .sub"]) {
+    const node = document.querySelector(sel);
+    if (node) node.style.display = "none";
+  }
+  const card = document.querySelector("#decisionFlow .flow-card");
+  if (card) card.style.display = "none";
 }
 
 /** 후보가 하나도 안 남은 카테고리 묶음은 제목만 떠 있게 되므로 함께 감춘다. */
@@ -819,15 +908,22 @@ function hideEmptyGoalGroups() {
 async function createTodosFromGoal() {
   if (!bridge.ready || !bridge.projectId) return;
 
-  const index = state.decisionGoal;
-  const goal = bridge.goals?.[index];
+  // 프로토타입은 여러 목표를 고를 수 있다. 고른 것들을 실제 후보로 되돌린다.
+  const picked = (state.decisionGoalsSelected ?? [])
+    .map((item) => bridge.goalByKey[item.key])
+    .filter(Boolean);
+  const goal = picked[0] ?? bridge.goals?.[state.decisionGoal];
   if (!goal) return;
+
+  // 둘 이상 골랐으면 나머지도 함께 반영되도록 이유에 적어 준다.
+  const extra = picked.slice(1).map((g) => g.title);
+  const why = extra.length ? `${goal.why} (함께 고른 목표: ${extra.join(", ")})` : goal.why;
 
   toastSafe("고른 목표로 할 일을 만드는 중이에요…");
   try {
     const { project } = await odot.createTodos(bridge.projectId, goal.suggestedDuration, {
       title: goal.title,
-      why: goal.why,
+      why,
     });
     bridge.lastProject = project;
     toastSafe(`'${project.title}' 할 일 ${project.todos.length}개를 만들었어요.`);
@@ -906,6 +1002,10 @@ async function renderRealProjects() {
   if (projects.length === 0) {
     el("#odotProjectSwitch")?.remove();
     ready.querySelector(".project-empty-state")?.removeAttribute("hidden");
+    for (const sel of ["#projects > h1", "#projects > .eyebrow"]) {
+      const node = el(sel);
+      if (node) node.style.display = "";
+    }
     return;
   }
 
@@ -913,8 +1013,11 @@ async function renderRealProjects() {
   // 목록이 화면 밖으로 밀려 전환이 안 되는 것처럼 보인다. 빈 상태만 감춘다.
   // 프로토타입이 만든 나머지(아카이브·진행률·플랜)는 그대로 둔다.
   ready.querySelector(".project-empty-state")?.setAttribute("hidden", "");
-  const title = el("#projects > h1");
-  if (title) title.innerHTML = "어떤 걸<br>이어서 해볼까요?";
+  // 목록만 보여주면 충분하다. 설명 문구는 걷어낸다.
+  for (const sel of ["#projects > h1", "#projects > .eyebrow"]) {
+    const node = el(sel);
+    if (node) node.style.display = "none";
+  }
 
   // 목록은 맨 위에 둔다.
   let block = el("#odotProjectSwitch");
@@ -925,7 +1028,6 @@ async function renderRealProjects() {
   }
 
   block.innerHTML =
-    '<p class="eyebrow">이어서 하기</p>' +
     '<div class="odot-project-list">' +
     projects
       .map((p) => {
