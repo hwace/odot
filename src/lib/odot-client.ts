@@ -401,6 +401,15 @@ export const odot = {
 /** 공유 버튼이 실제로 어떻게 끝났는지 */
 export type ShareOutcome = "requested" | "success" | "cancelled" | "saved" | "failed";
 
+/** 공유에 쓰는 그림. 미리 만들어 둔 한 장이라 서버를 부르지 않는다. */
+const SHARE_IMAGE_URL = "/assets/share-story.png";
+
+async function loadShareImage(): Promise<Blob> {
+  const res = await fetch(SHARE_IMAGE_URL, { cache: "force-cache" });
+  if (!res.ok) throw new Error("공유 이미지를 불러오지 못했습니다.");
+  return res.blob();
+}
+
 /**
  * 인스타그램 스토리로 보낸다.
  *
@@ -412,13 +421,16 @@ export type ShareOutcome = "requested" | "success" | "cancelled" | "saved" | "fa
  *
  * 파일 공유를 지원하지 않는 브라우저에서는 이미지를 저장하고 인스타그램을 연다.
  *
+ * 보내는 그림은 미리 만들어 둔 한 장(public/assets/share-story.png)이다.
+ * 달마다 다르게 그리지 않는다.
+ *
  * 돌려주는 값: "success" 공유함 · "cancelled" 사용자가 닫음 ·
  *              "saved" 저장 후 인스타그램 열림 · "failed" 실패
  */
 export async function shareToInstagram(month: string): Promise<ShareOutcome> {
   let result: ShareOutcome = "requested";
   try {
-    const blob = await odot.getShareImage(month);
+    const blob = await loadShareImage();
     const file = new File([blob], `odot-${month}.png`, { type: "image/png" });
 
     if (navigator.canShare && navigator.canShare({ files: [file] })) {

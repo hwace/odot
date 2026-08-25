@@ -365,6 +365,15 @@ export const odot = {
   logEvent: (type, payload) => request("/api/events", { method: "POST", body: { type, payload } }),
 };
 
+/** 공유에 쓰는 그림. 미리 만들어 둔 한 장이라 서버를 부르지 않는다. */
+const SHARE_IMAGE_URL = "/assets/share-story.png";
+
+async function loadShareImage() {
+  const res = await fetch(SHARE_IMAGE_URL, { cache: "force-cache" });
+  if (!res.ok) throw new Error("공유 이미지를 불러오지 못했습니다.");
+  return res.blob();
+}
+
 /**
  * 인스타그램 스토리로 보낸다.
  *
@@ -376,13 +385,16 @@ export const odot = {
  *
  * 파일 공유를 지원하지 않는 브라우저에서는 이미지를 저장하고 인스타그램을 연다.
  *
+ * 보내는 그림은 미리 만들어 둔 한 장(public/assets/share-story.png)이다.
+ * 달마다 다르게 그리지 않는다.
+ *
  * 돌려주는 값: "success" 공유함 · "cancelled" 사용자가 닫음 ·
  *              "saved" 저장 후 인스타그램 열림 · "failed" 실패
  */
 export async function shareToInstagram(month) {
   let result = "requested";
   try {
-    const blob = await odot.getShareImage(month);
+    const blob = await loadShareImage();
     const file = new File([blob], `odot-${month}.png`, { type: "image/png" });
 
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -447,10 +459,10 @@ function openInstagram() {
 
 /**
  * 공유 이미지를 화면에 미리 보여줄 때 쓴다.
- * <img src> 로는 x-device-id 헤더를 실을 수 없어서 blob URL 로 바꿔 넣어야 한다.
+ * 실제로 보내는 그림과 같은 파일이라야 미리보기가 거짓말을 하지 않는다.
  */
 export async function attachShareImage(imgElement, month) {
-  const blob = await odot.getShareImage(month);
+  const blob = await loadShareImage();
   const url = URL.createObjectURL(blob);
   imgElement.src = url;
   return () => URL.revokeObjectURL(url);

@@ -8,7 +8,6 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "build:og-assets": "node scripts/build-og-assets.mjs",
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
