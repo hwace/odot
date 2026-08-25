@@ -399,26 +399,60 @@ export const odot = {
 };
 
 /**
- * 인스타그램 공유 한 번에 처리하기.
- * 기기 공유 시트를 띄우고 결과까지 서버에 기록한다.
+ * 인스타그램 스토리로 보낸다.
+ *
+ * 버튼을 누르면 곧바로 인스타그램이 열린다 — 어디로 보낼지 고르는 창을 띄우지 않는다.
+ *
+ * 다만 **웹페이지가 인스타그램에 이미지를 직접 넘길 수는 없다.** 그건 앱끼리만
+ * 가능한 일이라, 여기서는 이미지를 기기에 저장한 뒤 스토리 카메라를 연다.
+ * 사용자는 인스타그램에서 방금 저장된 사진을 고르면 된다.
  */
 export async function shareToInstagram(month: string): Promise<ShareResult> {
   let result: ShareResult = "requested";
   try {
     const blob = await odot.getShareImage(month);
-    const file = new File([blob], `odot-${month}.png`, { type: "image/png" });
 
-    if (typeof navigator !== "undefined" && navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], title: `odot ${month} 관심사 정산` });
-      result = "success";
-    } else {
-      // 공유 시트를 못 쓰는 환경 → 인스타 앱이 없다고 보고 안내 화면으로 넘긴다.
-      result = "no_app";
-    }
+    // 1) 이미지를 기기에 저장한다.
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `odot-${month}.png`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+    // 2) 곧바로 인스타그램 스토리 카메라로 이동한다.
+    openInstagram();
+    result = "success";
   } catch {
     result = "failed";
   }
 
   await odot.logShare(month, result).catch(() => undefined);
   return result;
+}
+
+/**
+ * 인스타그램 앱을 연다. 앱이 없으면 잠시 뒤 웹으로 보낸다.
+ * (딥링크는 앱이 없을 때 아무 일도 일어나지 않아서, 화면이 그대로면 실패로 본다)
+ */
+function openInstagram() {
+  const APP = "instagram://story-camera";
+  const WEB = "https://www.instagram.com/";
+
+  const fallback = setTimeout(() => {
+    if (!document.hidden) window.location.href = WEB;
+  }, 1500);
+
+  // 앱으로 넘어가면 화면이 가려지므로 그때 취소한다.
+  document.addEventListener(
+    "visibilitychange",
+    () => {
+      if (document.hidden) clearTimeout(fallback);
+    },
+    { once: true },
+  );
+
+  window.location.href = APP;
 }

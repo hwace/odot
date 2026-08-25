@@ -8,24 +8,27 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ month: string }> };
 
-const CATEGORY_COLOR: Record<string, string> = {
-  exercise: "#F0554E",
-  study: "#F2913D",
-  reading: "#3FA96A",
-  music: "#8C63D6",
-  culture: "#E7C13B",
-  career: "#3B7DD8",
-  etc: "#8B8F98",
+/**
+ * 인스타그램 **스토리** 규격. 정사각형이 아니라 9:16 이다.
+ * 스토리에 올리면 위아래가 잘리지 않도록 안전 여백을 크게 잡는다.
+ */
+const WIDTH = 1080;
+const HEIGHT = 1920;
+
+/** 디자인 시안의 파스텔 원 색 */
+const BLOB = {
+  green: "#93BE9C",
+  yellow: "#FBE08A",
+  purple: "#C4A2E8",
+  blue: "#A9C3E8",
 };
 
 /**
  * GET /api/reports/monthly/:month/image
- * 인스타그램 공유용 1080x1080 PNG. (F-ZVJSOW)
+ * 인스타그램 스토리 공유용 1080x1920 PNG. (F-ZVJSOW)
  *
- * <img src> 로는 x-device-id 헤더를 실을 수 없으니 fetch 로 받아서 쓴다:
- *   const res  = await fetch(url, { headers: { "x-device-id": deviceId } });
- *   const blob = await res.blob();
- *   navigator.share({ files: [new File([blob], "odot.png", { type: "image/png" })] });
+ * <img src> 로는 x-device-id / Authorization 헤더를 실을 수 없으니 fetch 로 받는다.
+ * 클라이언트의 shareToInstagram() 이 그 과정을 대신한다.
  */
 export const GET = withRoute(async (req, ctx: Ctx) => {
   const user = await requireUser(req);
@@ -39,79 +42,197 @@ export const GET = withRoute(async (req, ctx: Ctx) => {
     return fail("NOT_FOUND", "공유할 정산 결과가 아직 없습니다.");
   }
 
-  const [year, mm] = month.split("-");
+  // 스토리 한 장에는 세 개까지가 읽기 좋다.
+  const top = report.topKeywords.slice(0, 3);
 
   return new ImageResponse(
     (
       <div
         style={{
-          width: "1080px",
-          height: "1080px",
+          width: `${WIDTH}px`,
+          height: `${HEIGHT}px`,
           display: "flex",
           flexDirection: "column",
-          justifyContent: "space-between",
-          padding: "88px 80px",
-          background: "linear-gradient(150deg, #12131A 0%, #1E2030 55%, #2A1F3D 100%)",
-          color: "#FFFFFF",
+          position: "relative",
+          background: "#FFFFFF",
           fontFamily: "sans-serif",
+          overflow: "hidden",
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ fontSize: 34, letterSpacing: 8, color: "#9BA1B0" }}>
-            {`${year}년 ${Number(mm)}월`}
-          </div>
-          <div style={{ fontSize: 76, fontWeight: 700, marginTop: 16 }}>
-            내가 관심 있던 것들
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          {report.topKeywords.map((k) => (
-            <div
-              key={k.keyword}
-              style={{ display: "flex", alignItems: "center", gap: 28 }}
-            >
-              <div
-                style={{
-                  width: 76,
-                  height: 76,
-                  borderRadius: 24,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 38,
-                  fontWeight: 700,
-                  background: CATEGORY_COLOR[k.category] ?? CATEGORY_COLOR.etc,
-                }}
-              >
-                {k.rank}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
-                <div style={{ fontSize: 46, fontWeight: 600 }}>{k.keyword}</div>
-                <div style={{ fontSize: 26, color: "#9BA1B0", marginTop: 6 }}>
-                  {k.isNew
-                    ? "이번 달에 새로 생긴 관심"
-                    : `지난달보다 ${k.delta! >= 0 ? "+" : ""}${k.delta}`}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
+        {/* 배경 원 — 시안의 네 귀퉁이 */}
         <div
           style={{
+            position: "absolute",
+            left: "-190px",
+            top: "180px",
+            width: "480px",
+            height: "480px",
+            borderRadius: "50%",
+            background: BLOB.green,
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-end",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            right: "-110px",
+            top: "-90px",
+            width: "440px",
+            height: "440px",
+            borderRadius: "50%",
+            background: BLOB.yellow,
+            display: "flex",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            right: "-150px",
+            bottom: "180px",
+            width: "620px",
+            height: "620px",
+            borderRadius: "50%",
+            background: BLOB.purple,
+            display: "flex",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            left: "-170px",
+            bottom: "-190px",
+            width: "460px",
+            height: "460px",
+            borderRadius: "50%",
+            background: BLOB.blue,
+            display: "flex",
+          }}
+        />
+
+        {/* 로고 */}
+        <div
+          style={{
+            position: "absolute",
+            left: "72px",
+            top: "62px",
+            display: "flex",
+            alignItems: "center",
+            fontSize: 64,
+            fontWeight: 800,
+            letterSpacing: "-3px",
+            color: "#24221E",
           }}
         >
-          <div style={{ fontSize: 28, color: "#9BA1B0" }}>
-            {`이번 달 스와이프 ${report.totalReactions}번 · 관심 ${report.likeCount}개`}
+          <div
+            style={{
+              width: "56px",
+              height: "44px",
+              marginRight: "6px",
+              borderRadius: "50%",
+              background: "#F08A80",
+              display: "flex",
+            }}
+          />
+          <div style={{ display: "flex" }}>d</div>
+          <div
+            style={{
+              width: "44px",
+              height: "44px",
+              margin: "0 4px",
+              borderRadius: "50%",
+              background: "#6E34CC",
+              display: "flex",
+            }}
+          />
+          <div style={{ display: "flex" }}>t</div>
+        </div>
+
+        {/* 본문 */}
+        <div
+          style={{
+            position: "absolute",
+            left: "210px",
+            top: "480px",
+            right: "90px",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              fontSize: 108,
+              fontWeight: 800,
+              letterSpacing: "-5px",
+              color: "#161513",
+            }}
+          >
+            이달의 관심
           </div>
-          <div style={{ fontSize: 26, color: "#6E7480", letterSpacing: 4 }}>odot</div>
+
+          <div style={{ display: "flex", flexDirection: "column", marginTop: "70px" }}>
+            {top.map((k, i) => (
+              <div
+                key={k.keyword}
+                style={{ display: "flex", flexDirection: "column", marginTop: i === 0 ? 0 : 96 }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    fontSize: 72,
+                    fontWeight: 800,
+                    letterSpacing: "-3px",
+                    color: "#161513",
+                  }}
+                >
+                  {`${k.rank}. ${k.keyword}`}
+                </div>
+                {k.isNew ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      marginTop: "14px",
+                      fontSize: 34,
+                      fontWeight: 800,
+                      color: "#9A958E",
+                    }}
+                  >
+                    이번 달 신규 관심사
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      marginTop: "14px",
+                      fontSize: 34,
+                      fontWeight: 800,
+                      color: "#9A958E",
+                    }}
+                  >
+                    {`지난달보다 ${(k.delta ?? 0) >= 0 ? "+" : ""}${k.delta ?? 0}`}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 하단 요약 */}
+        <div
+          style={{
+            position: "absolute",
+            left: "72px",
+            bottom: "70px",
+            display: "flex",
+            fontSize: 32,
+            fontWeight: 800,
+            color: "#6E6862",
+          }}
+        >
+          {`${month.replace("-", "년 ")}월 · 스와이프 ${report.totalReactions}번 · 관심 ${report.likeCount}개`}
         </div>
       </div>
     ),
-    { width: 1080, height: 1080 },
+    { width: WIDTH, height: HEIGHT },
   );
 });
