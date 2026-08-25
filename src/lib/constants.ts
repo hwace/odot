@@ -49,9 +49,10 @@ export const DEFAULT_DECK_SIZE = Number(process.env.CARD_DECK_SIZE ?? 5);
 
 /**
  * 미리 만들어 둘 카드 장수.
- * "2번 카드를 볼 때 6번 카드를 만든다" = 항상 4장 앞을 채워 둔다는 뜻이다.
+ * 빠르게 넘기는 사용자가 생성 속도를 추월하지 않도록 넉넉히 잡는다.
+ * (AI 한 번 호출에 5~10초 걸리는데, 700ms 간격으로 넘기면 5장은 3.5초에 동난다)
  */
-export const LOOKAHEAD = Number(process.env.CARD_LOOKAHEAD ?? 4);
+export const LOOKAHEAD = Number(process.env.CARD_LOOKAHEAD ?? 8);
 
 /**
  * 룩어헤드가 모자랄 때 한 번에 만들 최소 장수.
@@ -60,7 +61,7 @@ export const LOOKAHEAD = Number(process.env.CARD_LOOKAHEAD ?? 4);
  * 생성 속도를 따라잡아 버린다. 한 번 호출할 때 넉넉히 받아 두면
  * 호출 수도 줄고 버퍼도 안정적으로 유지된다.
  */
-export const REFILL_BATCH = Number(process.env.CARD_REFILL_BATCH ?? 5);
+export const REFILL_BATCH = Number(process.env.CARD_REFILL_BATCH ?? 8);
 
 /** 프로젝트 추천을 열어주는 최소 '관심' 수 */
 export const PROJECT_MIN_LIKES = Number(process.env.PROJECT_MIN_LIKES ?? 5);

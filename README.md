@@ -50,8 +50,8 @@ npm install
 | `CORS_ALLOW_ORIGIN` | | 프론트를 다른 오리진에서 띄울 때만 |
 | `PROJECT_MIN_LIKES` | | 할 일 만들기에 필요한 최소 관심 수. 기본 3 |
 | `CARD_DECK_SIZE` | | 한 번에 내려주는 카드 장수. 기본 5 |
-| `CARD_LOOKAHEAD` | | 미리 채워 둘 장수. 기본 4 |
-| `CARD_REFILL_BATCH` | | 리필 시 한 번에 만들 장수. 기본 5 |
+| `CARD_LOOKAHEAD` | | 미리 채워 둘 장수. 기본 8 |
+| `CARD_REFILL_BATCH` | | 리필 시 한 번에 만들 장수. 기본 8 |
 
 ```bash
 npm run dev

@@ -46,7 +46,7 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 | 6번부터 | AI 생성 — 앞선 카드를 볼 때 미리 만들어 둠 | 사용자는 대기 없음 |
 
 `POST /api/projects/:id/cards/prefetch` 를 **카드를 한 장 넘길 때마다** 부르면 됩니다.
-남은 장수가 충분하면 아무것도 하지 않고 즉시 돌아오고, 모자라면 한 번에 5장을 만들어 채웁니다.
+남은 장수가 충분하면 아무것도 하지 않고 즉시 돌아오고, 모자라면 한 번에 8장을 만들어 채웁니다.
 
 ---
 
@@ -227,7 +227,7 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 ### `POST /api/projects/:projectId/cards/prefetch` · 미리 만들기
 
 ```jsonc
-{ "lookahead": 4 }   // 생략 가능
+{ "lookahead": 8 }   // 생략 가능
 ```
 ```jsonc
 { "remaining": 8, "generated": 5 }
@@ -236,7 +236,7 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 **카드를 한 장 넘길 때마다 부르면 됩니다.** 응답을 기다릴 필요 없습니다.
 
 - 남은 장수가 `lookahead` 이상이면 `generated: 0`으로 즉시 돌아옵니다.
-- 모자라면 한 번에 5장(`CARD_REFILL_BATCH`)을 만들어 버퍼를 채웁니다.
+- 모자라면 한 번에 8장(`CARD_REFILL_BATCH`)을 만들어 버퍼를 채웁니다.
 - 같은 프로젝트에 대한 동시 호출은 서버에서 하나로 합쳐집니다.
 
 ### `POST /api/cards/:cardId/reaction` · 스와이프 확정

@@ -326,8 +326,16 @@ function installRealApi() {
     data.reactions.push({ topicId, category, type, at: new Date().toISOString() });
     Storage.write(data);
 
-    // 한 장 넘길 때마다 앞쪽을 채워 둔다 ("2번을 볼 때 6번을 만든다")
-    if (bridge.projectId) void odot.prefetch(bridge.projectId).catch(() => undefined);
+    // 한 장 넘길 때마다: 이미 만들어진 카드를 먼저 당겨오고,
+    // 서버에 다음 카드를 만들게 한 뒤 그 결과도 덱에 반영한다.
+    // ("2번을 볼 때 6번을 만든다")
+    if (bridge.projectId) {
+      void (async () => {
+        await topUpDeck();
+        await odot.prefetch(bridge.projectId).catch(() => undefined);
+        await topUpDeck();
+      })();
+    }
   };
 
   /** 관심 키워드를 조합해 할 일 생성 (F-PEBLKV) */
@@ -387,6 +395,59 @@ function installRealApi() {
   });
 }
 
+/* ── 덱 보충 ───────────────────────────────────────────────────────── */
+
+/**
+ * 로컬 덱(state.deck)에 서버 카드를 이어 붙인다.
+ *
+ * prefetch 는 서버에 카드를 '만들게' 할 뿐이라, 만들어진 카드를 화면으로
+ * 가져오는 건 별개다. 이게 없으면 처음 받은 5장을 다 넘긴 순간
+ * "오늘의 추천을 모두 살펴봤어요" 빈 상태로 빠져 버린다.
+ */
+const DECK_TAIL_MIN = 3;
+const TOPUP_COOLDOWN_MS = 1500;
+
+let toppingUp = false;
+let lastTopUpAt = 0;
+
+async function topUpDeck({ force = false } = {}) {
+  if (!bridge.projectId || toppingUp) return 0;
+
+  const tail = state.deck.length - state.current;
+  if (!force && tail > DECK_TAIL_MIN) return 0;
+  if (!force && Date.now() - lastTopUpAt < TOPUP_COOLDOWN_MS) return 0;
+
+  toppingUp = true;
+  try {
+    const deck = await odot.getCards(bridge.projectId, 20);
+    lastTopUpAt = Date.now();
+
+    const known = new Set(state.deck.map((c) => c.id));
+    const fresh = deck.cards.filter((c) => !known.has(c.id)).map(toTopic);
+    if (fresh.length === 0) return 0;
+
+    const wasEmpty = state.current >= state.deck.length;
+    state.deck.push(...fresh);
+    // 빈 상태 화면을 보고 있었다면 새 카드로 바로 바꿔 준다.
+    if (wasEmpty) window.renderDeck();
+    return fresh.length;
+  } catch (err) {
+    console.error("[odot] 덱 보충 실패", err);
+    return 0;
+  } finally {
+    toppingUp = false;
+  }
+}
+
+/** 덱이 비었는데 서버도 아직 준비 중일 때 보여줄 안내 */
+function showDeckPendingCard() {
+  const card = el("#activeCard");
+  if (!card) return;
+  card.innerHTML =
+    '<div class="empty"><strong>새 카드를 만드는 중이에요.</strong>' +
+    "<p>잠시만 기다려 주세요.</p></div>";
+}
+
 /** 서버 카드 → 프로토타입이 그릴 수 있는 모양 */
 function toTopic(card) {
   const t = byId(card.category);
@@ -423,7 +484,31 @@ function installSummaryPrefetch() {
   window.renderDeck = () => {
     base();
     const topic = activeTopic();
-    if (!topic || topic.easy) return;
+
+    if (!topic) {
+      // 덱이 비었다 — 서버에 남은 카드를 즉시 가져온다.
+      if (toppingUp) showDeckPendingCard();
+      else
+        void topUpDeck({ force: true }).then((added) => {
+          if (added === 0 && bridge.projectId) {
+            // 서버도 비었으면 만들게 하고, 만들어지면 반영한다.
+            showDeckPendingCard();
+            void odot
+              .prefetch(bridge.projectId)
+              .then(() => topUpDeck({ force: true }))
+              .then((n) => {
+                if (n === 0) base(); // 그래도 없으면 원래 빈 상태로 되돌린다
+              })
+              .catch(() => base());
+          }
+        });
+      return;
+    }
+
+    // 꼬리가 짧아지면 미리 이어 붙인다.
+    void topUpDeck();
+
+    if (topic.easy) return;
 
     el("#sheetCopy").textContent = "쉬운 설명을 가져오는 중이에요…";
     odot
