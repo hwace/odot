@@ -626,25 +626,29 @@ function injectScreenStyles() {
     /* 카드가 차지할 공간이 늘었으니 덱을 위로 끌어올린다 */
     #explore .deck{margin-top:8px}
 
-    /* '내 답 찾기' → 오른쪽 위 화살표 */
-    #explore .topbar{position:relative}
+    /* '내 답 찾기' → 오른쪽 위 화살표.
+       절대배치하면 '프로젝트 카드 N장' 과 겹치므로 흐름 안에 나란히 둔다. */
+    #explore .topbar{display:flex;align-items:center;gap:8px}
+    #explore .topbar .brand{margin-right:auto}
     #decisionStart.odot-arrow{
-      position:absolute;right:0;top:50%;transform:translateY(-50%);
-      width:40px;height:40px;padding:0;border:0;border-radius:50%;
+      position:static;flex:none;
+      width:38px;height:38px;padding:0;border:0;border-radius:50%;
       background:var(--primary);color:#fff;font-size:0;line-height:0;
       box-shadow:0 8px 18px #6e34cc38;cursor:pointer}
     #decisionStart.odot-arrow:after{
-      content:"→";font-size:19px;line-height:40px;font-weight:800;display:block}
+      content:"→";font-size:18px;line-height:38px;font-weight:800;display:block}
     #decisionStart.odot-arrow[hidden]{display:none}
 
-    /* 스크롤 없이 한 화면에 담기 (프로필 · 인사이트 제외) */
-    .screen.odot-fit{
+    /* 스크롤 없이 한 화면에 담기 (프로필 · 인사이트 제외)
+       — 반드시 .active 까지 붙인다. 안 그러면 .screen{display:none} 을
+         특정도로 이겨서 숨어 있어야 할 화면까지 전부 보인다. */
+    .screen.active.odot-fit{
       height:100dvh;overflow:hidden;
       display:flex;flex-direction:column;
       padding-bottom:calc(84px + env(safe-area-inset-bottom))}
-    .screen.odot-fit .deck{flex:1;min-height:0}
-    .screen.odot-fit .calendar-grid{flex:none}
-    .screen.odot-scroll{height:auto;overflow-y:auto}
+    .screen.active.odot-fit .deck{flex:1;min-height:0}
+    .screen.active.odot-fit .calendar-grid{flex:none}
+    .screen.active.odot-scroll{height:auto;overflow-y:auto}
 
     /* 관심사 화면: 여백을 줄여 한 화면에 담는다 */
     #interests.odot-fit h1{font-size:26px;letter-spacing:-1.2px;margin:2px 0 6px}
