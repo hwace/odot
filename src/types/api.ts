@@ -341,6 +341,7 @@ export type EventType =
   | "login"
   | "project_created"
   | "goals_generated"
+  | "todos_suggested"
   | "card_impression"
   | "card_prefetch"
   | "card_reaction"

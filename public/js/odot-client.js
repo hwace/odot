@@ -308,6 +308,16 @@ export const odot = {
       body: goal ? { duration, goal } : { duration },
     }),
 
+  /** 할 일 직접 추가 */
+  addTodo: (input) => request("/api/todos", { method: "POST", body: input }),
+
+  /** 지금 목록을 두고 뒤에 이어질 할 일을 AI 로 더 받는다 */
+  suggestTodos: (projectId, count) =>
+    request(`/api/projects/${projectId}/todos/suggest`, {
+      method: "POST",
+      body: count ? { count } : {},
+    }),
+
   updateTodo: (todoId, patch) => request(`/api/todos/${todoId}`, { method: "PATCH", body: patch }),
 
   /* ── 캘린더 ─────────────────────────────────────────────── */

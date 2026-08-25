@@ -604,6 +604,7 @@ const DECISION_MIN_LIKES = 5;
 function installScreenTweaks() {
   injectScreenStyles();
   installDecisionEntry();
+  installCalendarTweaks();
 
   // 카드가 다시 그려질 때마다 노출 조건을 다시 판단한다.
   const base = window.renderDeck;
@@ -668,6 +669,30 @@ function injectScreenStyles() {
     #calendar.odot-fit h1{font-size:26px;letter-spacing:-1.2px;margin:2px 0 6px}
     #calendar.odot-fit > .sub{margin:0 0 8px;font-size:13px}
     #calendar.odot-fit .topbar{margin-bottom:10px}
+
+    /* 아래로 스와이프 안내 */
+    .odot-swipe-hint{margin:10px 0 0;text-align:center;color:var(--muted);
+      font-size:12px;font-weight:800;transition:color .2s}
+    .odot-swipe-hint.ready{color:var(--primary)}
+    .odot-swipe-hint.ready i{display:inline-block;margin-right:4px;font-style:normal;
+      animation:odot-nudge 1.4s ease-in-out infinite}
+    @keyframes odot-nudge{0%,100%{transform:translateY(0)}50%{transform:translateY(3px)}}
+
+    /* 아카이브가 좌우로 밀리지 않게 — 달력을 화면 폭에 맞춘다.
+       7칸 그리드가 컨테이너보다 넓어지고, 날짜 칸 안 스티커가 칸을 넘쳐서
+       가로 스크롤이 생겼다. 칸을 1fr 로 묶고 넘치는 부분을 잘라낸다. */
+    #calendar,#calendarContent{overflow-x:hidden}
+    #calendar *{min-width:0}
+    #calendar .month-grid,
+    #calendar .weekday{
+      display:grid;grid-template-columns:repeat(7,minmax(0,1fr));
+      gap:4px;width:100%;box-sizing:border-box}
+    /* 칸 자체는 자르지 않는다 — 스티커가 일부러 칸 밖으로 삐져나오는 디자인이라
+       overflow:hidden 을 걸면 스티커가 잘린다. 넘침은 바깥 컨테이너에서만 막는다. */
+    #calendar .day{
+      aspect-ratio:1;width:auto;min-width:0;padding:0;font-size:11px;
+      box-sizing:border-box}
+    #calendarContent > *{max-width:100%;box-sizing:border-box}
 
     /* 로그인 · 온보딩: 회원가입 칸이 늘어난 만큼 여백을 줄인다 */
     #login.odot-fit,#onboarding.odot-fit{padding-bottom:24px}
@@ -772,6 +797,34 @@ function ensureDecisionSheet() {
   el("#odotDecisionCancel").onclick = () => closeSheets();
 }
 
+/* ── 캘린더 ────────────────────────────────────────────────────────── */
+
+/**
+ * 날짜를 누르면 그날 완료한 카테고리가 칩으로 나온다.
+ * 프로토타입은 회색 칩만 그리는데, 어느 분야였는지 한눈에 보이도록
+ * 칩 바탕을 그 카테고리 색으로 칠한다.
+ */
+function installCalendarTweaks() {
+  const base = window.renderCalendar;
+  if (typeof base !== "function") return;
+
+  window.renderCalendar = async () => {
+    await base();
+    paintCalendarCategories();
+  };
+}
+
+function paintCalendarCategories() {
+  document.querySelectorAll("#calendarContent .calendar-cats span").forEach((chip) => {
+    const topic = byName(chip.textContent.trim());
+    const color = topic ? topic.color : "gray";
+    chip.style.background = `var(--${color})`;
+    chip.style.color = "#fff";
+    chip.style.borderColor = "transparent";
+    chip.style.fontWeight = "800";
+  });
+}
+
 /* ── '내 답 찾기' 진입점 ───────────────────────────────────────────── */
 
 function installDecisionEntry() {
@@ -781,11 +834,49 @@ function installDecisionEntry() {
   installSwipeDown();
 }
 
-/** 카드가 다시 그려질 때마다 스와이프 감지를 새 카드에 붙인다. */
+/** 카드가 다시 그려질 때마다 스와이프 감지를 새 카드에 붙이고 안내를 갱신한다. */
 function updateDecisionEntry() {
   const button = el("#decisionStart");
   if (button) button.style.display = "none";
   installSwipeDown();
+  updateSwipeHint();
+}
+
+/**
+ * 아래로 스와이프가 가능해진 시점을 알려 준다.
+ *
+ * 아무 표시가 없으면 그런 동작이 있는 줄 모른다.
+ * 기준을 채우면 카드 아래에 안내가 올라오고, 그 전에는 몇 장 남았는지 보여준다.
+ */
+function updateSwipeHint() {
+  const deck = el("#explore .deck");
+  if (!deck) return;
+
+  let hint = el("#odotSwipeHint");
+  if (!hint) {
+    hint = document.createElement("p");
+    hint.id = "odotSwipeHint";
+    hint.className = "odot-swipe-hint";
+    deck.insertAdjacentElement("afterend", hint);
+  }
+
+  // 목표 찾기 화면에서는 감춘다.
+  if (el("#explore")?.classList.contains("decision-mode")) {
+    hint.style.display = "none";
+    return;
+  }
+  hint.style.display = "";
+
+  const likes = Storage.read().reactions.filter((x) => x.type === "like").length;
+  const left = DECISION_MIN_LIKES - likes;
+
+  if (left > 0) {
+    hint.className = "odot-swipe-hint";
+    hint.textContent = `관심 카드 ${likes} / ${DECISION_MIN_LIKES} · ${left}장 더 모으면 목표를 찾을 수 있어요`;
+  } else {
+    hint.className = "odot-swipe-hint ready";
+    hint.innerHTML = '<i aria-hidden="true">↓</i> 카드를 아래로 밀면 목표를 찾아드려요';
+  }
 }
 
 /* ── 결정 플로우 → 실제 할 일 후보군 ──────────────────────────────── */
@@ -926,6 +1017,7 @@ async function createTodosFromGoal() {
       why,
     });
     bridge.lastProject = project;
+    setOpenedProject(project.id);
     toastSafe(`'${project.title}' 할 일 ${project.todos.length}개를 만들었어요.`);
     window.showScreen("projects");
   } catch (err) {
@@ -992,6 +1084,12 @@ async function renderRealProjects() {
   const ready = el("#projectReady");
   if (!ready) return;
 
+  injectDetailStyles();
+  // 프로젝트를 열어 둔 상태면 목록 대신 그 프로젝트의 할 일을 보여준다.
+  if (await renderProjectDetail()) return;
+  el("#odotDetail")?.style.setProperty("display", "none");
+  el("#odotProjectSwitch")?.style.removeProperty("display");
+
   let projects = [];
   try {
     ({ projects } = await odot.listProjects());
@@ -1051,7 +1149,7 @@ async function renderRealProjects() {
     '<button class="odot-project-new" id="odotNewProject" type="button">+ 새 프로젝트 시작하기</button>';
 
   block.querySelectorAll("[data-project]").forEach((node) => {
-    node.onclick = () => void openSession(node.dataset.project);
+    node.onclick = () => void openProject(node.dataset.project);
   });
   const add = el("#odotNewProject");
   if (add) add.onclick = () => startNewProject();
@@ -1059,13 +1157,24 @@ async function renderRealProjects() {
 
 /** 관심사 선택 화면이 곧 '새 프로젝트' 화면이다. */
 function startNewProject() {
+  setOpenedProject(null);
   state.interests = [];
   window.renderInterests();
   window.showScreen("interests");
 }
 
+/**
+ * 목록에서 프로젝트를 연다.
+ * 세션(카드 덱·관심 이력)을 그 프로젝트로 갈아탄 뒤, 할 일 상세를 보여준다.
+ */
+async function openProject(projectId) {
+  setOpenedProject(projectId);
+  await openSession(projectId, { stayOnProjects: true });
+  window.renderProjects();
+}
+
 /** 다른 프로젝트로 갈아탄다. 덱과 관심 이력이 그 프로젝트 것으로 완전히 바뀐다. */
-async function openSession(projectId) {
+async function openSession(projectId, { stayOnProjects = false } = {}) {
   if (!projectId) return;
   try {
     const { project, eligibility } = await odot.getProject(projectId);
@@ -1087,7 +1196,7 @@ async function openSession(projectId) {
     state.current = 0;
     window.renderInterests();
     window.renderDeck();
-    window.showScreen("explore");
+    if (!stayOnProjects) window.showScreen("explore");
   } catch (err) {
     toastSafe(messageOf(err));
   }
@@ -1097,6 +1206,225 @@ function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
   );
+}
+
+/* ── 프로젝트 상세 (할 일 목록 · 추가 · 뒤로가기) ────────────────────── */
+
+/**
+ * 프로젝트를 열면 그 프로젝트의 할 일 목록을 보여준다.
+ * 뒤로가기(←)를 누르기 전까지는 프로젝트 탭이 계속 이 상세를 보여주고,
+ * 뒤로가기를 누르면 목록으로 돌아간다.
+ *
+ * 할 일은 두 가지로 늘린다 — AI 로 이어 받기, 직접 적어 넣기.
+ */
+
+/** 지금 열어 둔 프로젝트. null 이면 목록을 보여준다. */
+function openedProjectId() {
+  try {
+    return window.localStorage.getItem("odot.openProjectId");
+  } catch {
+    return null;
+  }
+}
+
+function setOpenedProject(projectId) {
+  try {
+    if (projectId) window.localStorage.setItem("odot.openProjectId", projectId);
+    else window.localStorage.removeItem("odot.openProjectId");
+  } catch {
+    /* 저장 실패해도 이번 세션은 동작한다 */
+  }
+}
+
+function injectDetailStyles() {
+  if (document.getElementById("odotDetailStyles")) return;
+  const style = document.createElement("style");
+  style.id = "odotDetailStyles";
+  style.textContent = `
+    .odot-detail{display:flex;flex-direction:column;min-height:0;flex:1}
+    .odot-detail-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+    .odot-back{flex:none;width:34px;height:34px;padding:0;border:1px solid var(--line);
+      border-radius:50%;background:#fff;color:var(--ink);font-size:17px;font-weight:800;
+      line-height:1;cursor:pointer}
+    .odot-detail-title{flex:1;min-width:0}
+    .odot-detail-title strong{display:block;font-size:17px;letter-spacing:-.5px;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .odot-detail-title span{color:var(--muted);font-size:12px;font-weight:700}
+    .odot-todos{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+      border:1px solid var(--line);border-radius:20px;background:#fff}
+    .odot-todo{display:flex;gap:10px;align-items:flex-start;padding:13px 14px;
+      border-bottom:1px solid #f1ece4;font-size:14px;line-height:1.45}
+    .odot-todo:last-child{border-bottom:0}
+    .odot-todo button{flex:none;width:22px;height:22px;margin-top:1px;padding:0;
+      border:1.5px solid var(--line);border-radius:7px;background:#fff;
+      color:transparent;font-size:13px;font-weight:800;line-height:1;cursor:pointer}
+    .odot-todo.done button{border-color:var(--primary);background:var(--primary);color:#fff}
+    .odot-todo.done .body{color:var(--muted);text-decoration:line-through}
+    .odot-todo .body{flex:1;min-width:0}
+    .odot-todo .when{display:block;margin-top:2px;color:var(--muted);font-size:11px;font-weight:800}
+    .odot-detail-actions{display:flex;gap:8px;margin-top:10px}
+    .odot-detail-actions button{flex:1;padding:12px;border:0;border-radius:16px;
+      font-size:13px;font-weight:800;cursor:pointer}
+    .odot-add-ai{background:var(--primary);color:#fff}
+    .odot-add-manual{background:#f1ece4;color:#4b443c}
+    .odot-add-form{display:flex;gap:8px;margin-top:8px}
+    .odot-add-form input{flex:1;min-width:0;border:1px solid var(--line);border-radius:14px;
+      padding:11px 13px;background:#fff}
+    .odot-add-form button{flex:none;padding:0 16px;border:0;border-radius:14px;
+      background:var(--primary);color:#fff;font-weight:800;cursor:pointer}
+  `;
+  document.head.append(style);
+}
+
+/** 프로젝트 상세를 그린다. 열어 둔 프로젝트가 없으면 아무것도 하지 않는다. */
+async function renderProjectDetail() {
+  const projectId = openedProjectId();
+  const ready = el("#projectReady");
+  if (!projectId || !ready || !bridge.ready) return false;
+
+  let project;
+  try {
+    ({ project } = await odot.getProject(projectId));
+  } catch (err) {
+    // 지워졌거나 남의 것이면 목록으로 되돌린다.
+    setOpenedProject(null);
+    return false;
+  }
+
+  // 목록/빈 상태는 감추고 상세만 남긴다.
+  el("#odotProjectSwitch")?.style.setProperty("display", "none");
+  ready.querySelector(".project-empty-state")?.setAttribute("hidden", "");
+  for (const sel of ["#projects > h1", "#projects > .eyebrow"]) {
+    const node = el(sel);
+    if (node) node.style.display = "none";
+  }
+  ready.hidden = false;
+
+  const topic = byId(project.topic);
+  const done = project.todos.filter((t) => t.isCompleted).length;
+
+  let panel = el("#odotDetail");
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.id = "odotDetail";
+    panel.className = "odot-detail";
+    ready.prepend(panel);
+  }
+  panel.style.display = "";
+
+  panel.innerHTML = `
+    <div class="odot-detail-head">
+      <button class="odot-back" id="odotDetailBack" type="button" aria-label="프로젝트 목록으로">←</button>
+      <span class="odot-detail-title">
+        <strong>${escapeHtml(project.title ?? `${project.customTopic ?? topic.name} 탐색`)}</strong>
+        <span>${done} / ${project.todos.length} 완료</span>
+      </span>
+    </div>
+    <div class="odot-todos" id="odotTodoList">${todoListHtml(project.todos)}</div>
+    <div class="odot-detail-actions">
+      <button class="odot-add-ai" id="odotAddAi" type="button">AI로 이어 받기</button>
+      <button class="odot-add-manual" id="odotAddManual" type="button">직접 적기</button>
+    </div>
+    <form class="odot-add-form" id="odotAddForm" hidden>
+      <input id="odotAddInput" maxlength="80" placeholder="할 일을 적어 주세요">
+      <button type="submit">추가</button>
+    </form>
+  `;
+
+  el("#odotDetailBack").onclick = () => {
+    setOpenedProject(null);
+    panel.style.display = "none";
+    window.renderProjects();
+  };
+  el("#odotAddAi").onclick = () => void addTodosWithAi(projectId);
+  el("#odotAddManual").onclick = () => {
+    const form = el("#odotAddForm");
+    form.hidden = !form.hidden;
+    if (!form.hidden) el("#odotAddInput").focus();
+  };
+  el("#odotAddForm").onsubmit = (event) => {
+    event.preventDefault();
+    void addTodoManually(projectId);
+  };
+  bindTodoChecks(projectId);
+  return true;
+}
+
+function todoListHtml(todos) {
+  if (todos.length === 0) {
+    return '<div class="empty" style="border:0"><strong>아직 할 일이 없어요.</strong><p>아래에서 추가해 보세요.</p></div>';
+  }
+  return todos
+    .map(
+      (t) => `<div class="odot-todo ${t.isCompleted ? "done" : ""}" data-todo="${t.id}">
+        <button type="button" aria-label="${t.isCompleted ? "완료 취소" : "완료"}">✓</button>
+        <span class="body">${escapeHtml(t.content)}
+          <span class="when">${escapeHtml(t.category)}${t.recommendedAt ? ` · ${escapeHtml(t.recommendedAt)}` : ""}</span>
+        </span>
+      </div>`,
+    )
+    .join("");
+}
+
+function bindTodoChecks(projectId) {
+  document.querySelectorAll("#odotTodoList [data-todo]").forEach((row) => {
+    const button = row.querySelector("button");
+    if (!button) return;
+    button.onclick = async () => {
+      const next = !row.classList.contains("done");
+      row.classList.toggle("done", next); // 먼저 반응시키고
+      updateTodoProgress();
+      try {
+        await odot.updateTodo(row.dataset.todo, { isCompleted: next });
+      } catch (err) {
+        row.classList.toggle("done", !next); // 실패하면 되돌린다
+        updateTodoProgress();
+        toastSafe(messageOf(err));
+      }
+    };
+  });
+}
+
+/**
+ * 완료 수만 갱신한다.
+ * 체크할 때마다 패널을 통째로 다시 그리면 적고 있던 '직접 적기' 입력이 날아간다.
+ */
+function updateTodoProgress() {
+  const rows = [...document.querySelectorAll("#odotTodoList [data-todo]")];
+  const done = rows.filter((r) => r.classList.contains("done")).length;
+  const label = document.querySelector("#odotDetail .odot-detail-title span");
+  if (label) label.textContent = `${done} / ${rows.length} 완료`;
+}
+
+async function addTodosWithAi(projectId) {
+  const button = el("#odotAddAi");
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "만드는 중…";
+  try {
+    const { todos } = await odot.suggestTodos(projectId, 3);
+    toastSafe(`할 일 ${todos.length}개를 이어 받았어요.`);
+    await renderProjectDetail();
+  } catch (err) {
+    toastSafe(messageOf(err));
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+async function addTodoManually(projectId) {
+  const input = el("#odotAddInput");
+  const content = input.value.trim();
+  if (!content) return;
+  try {
+    await odot.addTodo({ projectId, content });
+    input.value = "";
+    el("#odotAddForm").hidden = true;
+    await renderProjectDetail();
+  } catch (err) {
+    toastSafe(messageOf(err));
+  }
 }
 
 /* ── 덱 보충 ───────────────────────────────────────────────────────── */

@@ -154,3 +154,77 @@ export async function generateProject(
     })),
   };
 }
+
+/**
+ * 이미 있는 할 일 목록에 **이어서** 몇 개를 더 만든다. (프로젝트 상세의 'AI 추천')
+ *
+ * 전체 재생성과 다르다 — 지금 목록을 그대로 두고 뒤를 잇는다.
+ * 이미 있는 할 일을 프롬프트에 함께 넣어 중복을 피한다.
+ */
+export async function generateMoreTodos(input: {
+  userId: string;
+  age: number;
+  projectTitle: string;
+  likedKeywords: string[];
+  duration: ProjectDuration;
+  sessionKey: string;
+  existing: Array<{ content: string; recommendedAt: string | null }>;
+  count: number;
+}): Promise<GeneratedTodo[]> {
+  const policy = policyFor(input.age);
+  const plan = DURATION_PLAN[input.duration];
+  const count = Math.min(Math.max(input.count, 1), 6);
+
+  const system = [
+    "너는 진행 중인 프로젝트에 이어질 할 일을 덧붙이는 코치다.",
+    "이미 있는 할 일은 그대로 두고, 빠진 단계나 다음 단계를 채운다.",
+    "",
+    "[반드시 지킨다]",
+    "- 이미 있는 할 일과 겹치는 내용을 만들지 않는다.",
+    "- 마지막 할 일 다음으로 자연스럽게 이어지게 한다.",
+    "",
+    "[연령 정책 — 반드시 지킨다]",
+    policy.promptGuidance,
+    `다음 주제는 어떤 형태로도 언급하지 않는다: ${policy.blockedTerms.slice(0, 40).join(", ")}`,
+    "",
+    "[출력 형식]",
+    'JSON 객체 하나만 출력한다. 모양: {"todos":[{"content":"","category":"","recommendedAt":"","minAge":0}]}',
+    "- content: 한 번에 끝낼 수 있는 구체적인 행동. 50자 이내.",
+    `- category: 반드시 다음 중 하나 — ${CATEGORY_LABELS.join(" | ")}. 애매하면 기타.`,
+    `- recommendedAt: 권장 시점을 ${plan.unit} 단위로 적는다.`,
+    "- minAge: 안전하게 할 수 있는 최소 나이. 제한 없으면 0.",
+    "모든 문장은 한국어로 쓴다.",
+  ].join("\n");
+
+  const user = [
+    `사용자 나이: ${input.age}세`,
+    `프로젝트: ${input.projectTitle}`,
+    `관심 키워드: ${input.likedKeywords.slice(0, 15).join(", ")}`,
+    `수행 기간: ${plan.label}`,
+    "",
+    "이미 있는 할 일:",
+    ...input.existing.map((t, i) => `${i + 1}. ${t.recommendedAt ?? "-"} · ${t.content}`),
+    "",
+    `여기에 이어질 할 일 ${count}개를 만들어줘.`,
+  ].join("\n");
+
+  const payload = await completeJson<unknown>({ system, user, sessionKey: input.sessionKey });
+  const parsed = z.object({ todos: z.array(TodoSchema) }).safeParse(payload);
+  if (!parsed.success) return [];
+
+  const seen = new Set(input.existing.map((t) => t.content.trim()));
+  const fresh = parsed.data.todos.filter((t) => !seen.has(t.content.trim()));
+
+  const { passed } = await screen(
+    fresh,
+    (t) => ({ text: `${t.content} ${t.category}`, minAge: normalizeMinAge(t.minAge) }),
+    { userId: input.userId, age: input.age, source: "todo" },
+  );
+
+  return passed.map((t, i) => ({
+    content: t.content.trim(),
+    category: CATEGORY_SET.has(t.category.trim()) ? t.category.trim() : "기타",
+    recommendedAt: t.recommendedAt?.trim() || null,
+    orderIndex: input.existing.length + i,
+  }));
+}

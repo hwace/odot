@@ -314,6 +314,21 @@ export const odot = {
       body: json(goal ? { duration, goal } : { duration }),
     }),
 
+  /** 할 일 직접 추가 (프로젝트 상세에서 손으로 적어 넣기) */
+  addTodo: (input: {
+    projectId: string;
+    content: string;
+    category?: string;
+    recommendedAt?: string;
+  }) => request<{ todo: ProjectTodo }>("/api/todos", { method: "POST", body: json(input) }),
+
+  /** 지금 목록을 두고 뒤에 이어질 할 일을 AI 로 더 받는다 */
+  suggestTodos: (projectId: string, count?: number) =>
+    request<{ todos: ProjectTodo[] }>(`/api/projects/${projectId}/todos/suggest`, {
+      method: "POST",
+      body: json(count ? { count } : {}),
+    }),
+
   updateTodo: (
     todoId: string,
     patch: { isCompleted?: boolean; category?: string; completedAt?: string },
