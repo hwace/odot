@@ -514,6 +514,12 @@ function installRealApi() {
     data.reactions.push({ topicId, category, type, at: new Date().toISOString() });
     Storage.write(data);
 
+    // 관심으로 넘긴 카드는 보관함에도 바로 담는다 ('선택한 카드' 목록에 쓰인다).
+    if (type === "like" && typeof upsertInterestCard === "function") {
+      const topic = state.deck.find((c) => c.id === topicId);
+      if (topic) upsertInterestCard(topic);
+    }
+
     // 한 장 넘길 때마다: 이미 만들어진 카드를 먼저 당겨오고,
     // 서버에 다음 카드를 만들게 한 뒤 그 결과도 덱에 반영한다.
     // ("2번을 볼 때 6번을 만든다")
@@ -605,6 +611,8 @@ function installScreenTweaks() {
   injectScreenStyles();
   installDecisionEntry();
   installCalendarTweaks();
+  installSummarySheet();
+  hideDemoInterestCards();
 
   // 카드가 다시 그려질 때마다 노출 조건을 다시 판단한다.
   const base = window.renderDeck;
@@ -670,6 +678,15 @@ function injectScreenStyles() {
     #calendar.odot-fit > .sub{margin:0 0 8px;font-size:13px}
     #calendar.odot-fit .topbar{margin-bottom:10px}
 
+    /* 확인 시트의 취소 버튼.
+       프로토타입의 .close 는 float:right 라 위 버튼과 겹친다. */
+    .odot-sheet-cancel{display:block;width:100%;margin-top:8px;padding:12px;
+      border:0;border-radius:16px;background:#f1ece4;color:#4b443c;
+      font-size:14px;font-weight:800;cursor:pointer}
+
+    /* 카드가 처음 들어왔을 때도 제 크기로 잡히도록 최소 높이를 준다 */
+    .screen.active.odot-fit .deck{min-height:52dvh}
+
     /* 아래로 스와이프 안내 */
     .odot-swipe-hint{margin:10px 0 0;text-align:center;color:var(--muted);
       font-size:12px;font-weight:800;transition:color .2s}
@@ -677,6 +694,9 @@ function injectScreenStyles() {
     .odot-swipe-hint.ready i{display:inline-block;margin-right:4px;font-style:normal;
       animation:odot-nudge 1.4s ease-in-out infinite}
     @keyframes odot-nudge{0%,100%{transform:translateY(0)}50%{transform:translateY(3px)}}
+
+    /* 아카이브 상단 설명 문구는 걷어낸다 */
+    #calendar > .eyebrow,#calendar > h1{display:none}
 
     /* 아카이브가 좌우로 밀리지 않게 — 달력을 화면 폭에 맞춘다.
        7칸 그리드가 컨테이너보다 넓어지고, 날짜 칸 안 스티커가 칸을 넘쳐서
@@ -786,7 +806,7 @@ function ensureDecisionSheet() {
     <h2>이제 목표를 찾아볼까요?</h2>
     <p>지금까지 모은 관심 카드로 나에게 맞는 목표를 찾아드려요.</p>
     <button class="primary" id="odotDecisionGo" type="button">목표 찾기</button>
-    <button class="close" id="odotDecisionCancel" type="button">더 둘러볼래요</button>
+    <button class="odot-sheet-cancel" id="odotDecisionCancel" type="button">더 둘러볼래요</button>
   `;
   document.body.append(sheet);
 
@@ -795,6 +815,86 @@ function ensureDecisionSheet() {
     startDecision();
   };
   el("#odotDecisionCancel").onclick = () => closeSheets();
+}
+
+/* ── 요약 시트 · 관심 카드 보관함 ─────────────────────────────────── */
+
+/**
+ * 위로 스와이프하면 뜨는 요약 시트를 정리한다.
+ *
+ *   · '이 주제 관심에 담기' 버튼 제거 — 관심 표시는 오른쪽 스와이프로 한다.
+ *     같은 일을 두 곳에서 하면 카드가 이미 넘어간 뒤에 또 눌리는 문제가 생긴다.
+ *   · 아래로 스와이프하면 닫힌다.
+ */
+function installSummarySheet() {
+  const save = el("#saveInterest");
+  if (save) save.style.display = "none";
+
+  for (const id of ["#summarySheet", "#shareSheet"]) {
+    const sheet = el(id);
+    if (!sheet || sheet.dataset.odotSwipeClose) continue;
+    sheet.dataset.odotSwipeClose = "1";
+
+    let start = null;
+    sheet.addEventListener("pointerdown", (e) => {
+      start = { y: e.clientY, top: sheet.scrollTop };
+    });
+    sheet.addEventListener("pointermove", (e) => {
+      if (!start) return;
+      const dy = e.clientY - start.y;
+      // 안쪽을 스크롤 중이면 시트를 끌지 않는다.
+      if (start.top > 0) return;
+      if (dy > 0) sheet.style.transform = `translateY(${dy}px)`;
+    });
+    sheet.addEventListener("pointerup", (e) => {
+      if (!start) return;
+      const dy = e.clientY - start.y;
+      const wasTop = start.top === 0;
+      start = null;
+      sheet.style.transform = "";
+      if (wasTop && dy > 90) closeSheets();
+    });
+    sheet.addEventListener("pointercancel", () => {
+      start = null;
+      sheet.style.transform = "";
+    });
+  }
+}
+
+/**
+ * 관심 카드 보관함을 실제 데이터로 맞춘다.
+ *
+ * 프로토타입은 데모 카드(demo-career-role 등)를 심어 두고 그것으로
+ * '이번 프로젝트에서 선택한 카드'를 그린다. 지금 프로젝트에서 실제로
+ * 오른쪽으로 넘긴 카드로 갈아끼운다.
+ */
+function hideDemoInterestCards() {
+  if (typeof interestCards !== "function" || interestCards.odotFiltered) return;
+
+  // 저장소를 비우면 프로토타입이 '비었다' 고 보고 데모 카드를 다시 심는다.
+  // 그래서 지우는 대신 읽을 때 걸러낸다.
+  const base = interestCards;
+  const filtered = () => base().filter((card) => !String(card.id).startsWith("demo-"));
+  filtered.odotFiltered = true;
+  window.interestCards = filtered;
+}
+
+function syncInterestInbox(likedCards) {
+  hideDemoInterestCards();
+  if (typeof upsertInterestCard !== "function") return;
+
+  // 최근에 담은 것이 뒤에 오도록 역순으로 넣는다.
+  [...likedCards].reverse().forEach((card) => {
+    const topic = byId(card.category);
+    upsertInterestCard({
+      id: `srv:${card.keyword}`,
+      category: topic.name,
+      color: topic.color,
+      title: card.keyword,
+      intro: "",
+      reason: `오늘의 발견 · ${topic.name}`,
+    });
+  });
 }
 
 /* ── 캘린더 ────────────────────────────────────────────────────────── */
@@ -1190,6 +1290,8 @@ async function openSession(projectId, { stayOnProjects = false } = {}) {
         keyword,
       })),
     });
+    syncInterestInbox(eligibility.likedCards ?? []);
+    if (typeof syncProjectCandidates === "function") syncProjectCandidates();
 
     // 이전 세션의 덱을 완전히 버리고 이 프로젝트 것으로 채운다.
     state.deck = await MockAPI.getRecommendations();
@@ -1731,6 +1833,10 @@ async function hydrate() {
       keyword,
     })),
   });
+
+  // '이번 프로젝트에서 선택한 카드' 가 데모 데이터로 차 있으므로 실제 값으로 바꾼다.
+  syncInterestInbox(eligibility.likedCards ?? []);
+  if (typeof syncProjectCandidates === "function") syncProjectCandidates();
 }
 
 /* ── 부팅 ──────────────────────────────────────────────────────────── */

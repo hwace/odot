@@ -76,14 +76,27 @@ export async function computeEligibility(
 ): Promise<ProjectEligibility> {
   const { data, error } = await db()
     .from("card_reactions")
-    .select("keyword, reacted_at")
+    .select("keyword, category, reacted_at")
     .eq("project_id", project.id)
     .eq("reaction", "like")
     .order("reacted_at", { ascending: false });
   if (error) throw error;
 
-  const likes = (data ?? []) as Array<{ keyword: string }>;
-  const likedKeywords = [...new Set(likes.map((l) => l.keyword))];
+  const likes = (data ?? []) as Array<{ keyword: string; category: string | null }>;
+
+  // 같은 키워드가 두 번 잡히지 않도록 최근 것만 남긴다.
+  const seen = new Set<string>();
+  const likedCards: Array<{ keyword: string; category: TopicId }> = [];
+  for (const like of likes) {
+    if (seen.has(like.keyword)) continue;
+    seen.add(like.keyword);
+    likedCards.push({
+      keyword: like.keyword,
+      category: (like.category ?? project.topic ?? "etc") as TopicId,
+    });
+  }
+
+  const likedKeywords = likedCards.map((c) => c.keyword);
   const likeCount = likedKeywords.length;
   const eligible = likeCount >= PROJECT_MIN_LIKES;
 
@@ -93,6 +106,7 @@ export async function computeEligibility(
     likeCount,
     requiredLikeCount: PROJECT_MIN_LIKES,
     likedKeywords,
+    likedCards,
     message: eligible
       ? "관심 키워드를 조합해 할 일을 만들 수 있어요."
       : `카드를 ${PROJECT_MIN_LIKES - likeCount}개만 더 관심으로 넘기면 할 일을 만들 수 있어요.`,

@@ -188,6 +188,8 @@ export interface ProjectEligibility {
   requiredLikeCount: number;
   /** 이 프로젝트에서 관심을 표시한 키워드 (최근 순) */
   likedKeywords: string[];
+  /** 같은 목록에 카테고리를 붙인 것. 화면에서 색·아이콘을 고를 때 쓴다. */
+  likedCards: Array<{ keyword: string; category: TopicId }>;
   /** 아직 부족할 때 화면에 띄울 안내 문구 */
   message: string;
   durations: DurationOption[];
