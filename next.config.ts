@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // 공유 이미지는 폰트와 그림 파일을 직접 읽는다. public/ 은 CDN 으로만 나가고
+  // 서버리스 번들에는 들어가지 않아서, 쓰는 파일을 따로 챙겨 넣어야 한다.
+  outputFileTracingIncludes: {
+    "/api/reports/monthly/[month]/image": ["./src/og-assets/**"],
+  },
+
   // 루트로 들어오면 앱 화면을 띄운다.
   // 앱은 팀원 프로토타입(public/app.html)이라 Next 페이지가 아니다.
   async redirects() {

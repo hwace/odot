@@ -289,9 +289,12 @@ async function main() {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   check("공유 이미지 200 PNG", imgRes.status === 200 && imgRes.headers.get("content-type")?.includes("image/png"));
-  const bytes = (await imgRes.arrayBuffer()).byteLength;
-  check("공유 이미지 크기 정상", bytes > 5000, `${bytes} bytes`);
-  note(`${(bytes / 1024).toFixed(0)} KB`);
+  const png = Buffer.from(await imgRes.arrayBuffer());
+  check("공유 이미지 크기 정상", png.byteLength > 5000, `${png.byteLength} bytes`);
+  // PNG 머리말에 가로·세로가 들어 있다. 인스타 스토리는 9:16 이라야 꽉 찬다.
+  const [w, h] = [png.readUInt32BE(16), png.readUInt32BE(20)];
+  check("공유 이미지 9:16 (1080x1920)", w === 1080 && h === 1920, `${w}x${h}`);
+  note(`${(png.byteLength / 1024).toFixed(0)} KB · ${w}x${h}`);
   check("공유 기록", (await call("POST", `/api/reports/monthly/${month}/share`, { result: "success" })).data?.log?.result === "success");
 
   step("11. 연령 검열");

@@ -8,12 +8,14 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "build:og-assets": "node scripts/build-og-assets.mjs",
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",
     "next": "^15.5.4",
     "openai": "^6.2.0",
+    "pretendard": "^1.3.9",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "zod": "^4.1.11"
