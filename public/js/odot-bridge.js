@@ -100,92 +100,223 @@ function messageOf(err) {
   return err instanceof OdotApiError ? err.message : "잠시 후 다시 시도해주세요.";
 }
 
-/* ── 1. 나이 입력 단계 ─────────────────────────────────────────────── */
+/* ── 1. 로그인 / 회원가입 ───────────────────────────────────────────── */
 
 /**
- * 온보딩을 벗어나는 모든 경로(다음 버튼, 건너뛰기, 하단 탭)를 가로채서
- * 나이를 아직 안 받았으면 나이 입력 화면을 먼저 띄운다.
+ * 프로토타입의 로그인 화면(#loginForm)을 실제 계정에 연결한다.
+ *
+ * 원래는 demo@odot.app / odot1234 를 하드코딩으로 비교하는 목이었다.
+ * 여기서 실제 signUp / logIn 으로 바꾸고, 폼에 없는 것 두 가지를 채워 넣는다:
+ *   · 회원가입 모드 전환 (프로토타입에는 로그인만 있다)
+ *   · 나이 입력 (연령별 콘텐츠 검열의 기준값이라 가입 때 꼭 필요하다)
  */
-function installAgeGate() {
+
+let authMode = "login"; // "login" | "signup"
+
+function installAuth() {
+  const form = el("#loginForm");
+  if (!form) return;
+
+  injectAuthExtras(form);
+  form.onsubmit = (event) => {
+    event.preventDefault();
+    void submitAuth();
+  };
+
+  // 온보딩을 벗어나는 모든 경로에서, 로그인 전이면 로그인 화면으로 보낸다.
   const base = window.showScreen;
   window.showScreen = (id) => {
-    if (!bridge.ready && id !== "onboarding") {
-      showAgeSlide();
+    if (!bridge.ready && id !== "onboarding" && id !== "login") {
+      base("login");
       return;
     }
     base(id);
   };
 }
 
-function ensureAgeSlide() {
-  let slide = el("#odotAgeSlide");
-  if (slide) return slide;
+/** 폼에 없는 것들(나이, 모드 전환)을 프로토타입 CSS 그대로 끼워 넣는다. */
+function injectAuthExtras(form) {
+  if (el("#odotAgeField")) return;
 
-  slide = document.createElement("div");
-  slide.className = "onboard-slide";
-  slide.id = "odotAgeSlide";
-  slide.innerHTML = `
-    <p class="eyebrow">시작하기 전에</p>
-    <h1>몇 살인지<br>알려 주세요.</h1>
-    <p class="sub">나이에 맞는 활동만 추천하려고 물어봐요. 다른 곳에는 쓰지 않아요.</p>
-    <div class="custom-wrap">
-      <input id="odotAgeInput" type="number" inputmode="numeric" min="5" max="120" placeholder="예: 17">
-      <button id="odotAgeSubmit" type="button">확인</button>
-    </div>
-    <small class="field-help" id="odotAgeHelp">5살부터 120살까지 입력할 수 있어요.</small>
-  `;
-  document.querySelector(".onboard").append(slide);
+  const submit = form.querySelector("button[type=submit]");
+  if (!submit) return;
 
-  const submit = () => void saveAge();
-  slide.querySelector("#odotAgeSubmit").onclick = submit;
-  slide.querySelector("#odotAgeInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") submit();
-  });
-  return slide;
+  const ageField = document.createElement("div");
+  ageField.id = "odotAgeField";
+  ageField.hidden = true;
+  ageField.innerHTML =
+    '<label for="odotAge">나이</label>' +
+    '<input id="odotAge" type="number" inputmode="numeric" min="5" max="120" placeholder="예: 17">';
+  submit.insertAdjacentElement("beforebegin", ageField);
+
+  const help = document.createElement("p");
+  help.className = "demo-account";
+  help.id = "odotAuthHelp";
+  help.textContent = "나이는 연령에 맞는 활동만 추천하는 데만 써요.";
+  help.hidden = true;
+  ageField.insertAdjacentElement("afterend", help);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "text-action";
+  toggle.id = "odotAuthToggle";
+  toggle.onclick = () => setAuthMode(authMode === "login" ? "signup" : "login");
+  submit.insertAdjacentElement("afterend", toggle);
+
+  // 데모 계정 안내와 미리 채워진 데모 값은 더 이상 맞지 않는다.
+  form.querySelector(".demo-account")?.remove();
+  const email = el("#loginEmail");
+  const password = el("#loginPassword");
+  if (email && email.value === "demo@odot.app") email.value = "";
+  if (password && password.value === "odot1234") password.value = "";
+
+  setAuthMode("login");
 }
 
-function showAgeSlide() {
-  const slide = ensureAgeSlide();
-  document.querySelectorAll(".onboard-slide").forEach((x) => x.classList.remove("active"));
-  slide.classList.add("active");
+function setAuthMode(mode) {
+  authMode = mode;
+  const signup = mode === "signup";
 
-  // 나이 화면에서는 슬라이드 네비게이션을 감춘다.
-  for (const sel of ["#onboardNext", "#onboardSkip", ".dots"]) {
-    const node = el(sel);
-    if (node) node.hidden = true;
+  const ageField = el("#odotAgeField");
+  const help = el("#odotAuthHelp");
+  if (ageField) ageField.hidden = !signup;
+  if (help) help.hidden = !signup;
+
+  const submit = el("#loginForm")?.querySelector("button[type=submit]");
+  if (submit) submit.textContent = signup ? "가입하고 시작하기" : "로그인하고 시작하기";
+
+  const toggle = el("#odotAuthToggle");
+  if (toggle) toggle.textContent = signup ? "이미 계정이 있어요. 로그인" : "처음이신가요? 회원가입";
+
+  const password = el("#loginPassword");
+  if (password) {
+    password.autocomplete = signup ? "new-password" : "current-password";
+    password.placeholder = signup ? "8자 이상" : "";
   }
-  el("#odotAgeInput")?.focus();
 }
 
-async function saveAge() {
-  const input = el("#odotAgeInput");
-  const help = el("#odotAgeHelp");
-  const age = Number(input.value);
+async function submitAuth() {
+  const email = el("#loginEmail").value.trim();
+  const password = el("#loginPassword").value;
+  const submit = el("#loginForm").querySelector("button[type=submit]");
+  const label = submit.textContent;
 
-  if (!Number.isInteger(age) || age < 5 || age > 120) {
-    help.textContent = "5살부터 120살까지 숫자로 입력해 주세요.";
+  if (!email || !password) {
+    toastSafe("이메일과 비밀번호를 입력해 주세요.");
     return;
   }
 
-  const button = el("#odotAgeSubmit");
-  button.disabled = true;
-  help.textContent = "확인하고 있어요…";
+  let age;
+  if (authMode === "signup") {
+    age = Number(el("#odotAge").value);
+    if (!Number.isInteger(age) || age < 5 || age > 120) {
+      toastSafe("나이를 5살부터 120살 사이로 입력해 주세요.");
+      return;
+    }
+    if (password.length < 8) {
+      toastSafe("비밀번호는 8자 이상이어야 해요.");
+      return;
+    }
+  }
+
+  submit.disabled = true;
+  submit.textContent = authMode === "signup" ? "가입하는 중…" : "로그인하는 중…";
 
   try {
-    await odot.createUser({ age });
+    const result =
+      authMode === "signup"
+        ? await odot.signUp({ email, password, age })
+        : await odot.logIn({ email, password });
+
     bridge.ready = true;
+    // 프로토타입 내부 상태도 로그인됨으로 맞춰 준다.
+    writeProfile({
+      signedIn: true,
+      email: result.user.email,
+      name: result.user.displayName,
+      notifications: result.user.notifications,
+    });
+
     await hydrate();
-    help.textContent = "";
-    for (const sel of ["#onboardNext", "#onboardSkip", ".dots"]) {
-      const node = el(sel);
-      if (node) node.hidden = false;
-    }
-    window.showScreen("interests");
+    window.renderInterests();
+    window.showScreen(state.interests.length ? "explore" : "interests");
+    toastSafe(`${result.user.displayName}님, 반가워요.`);
   } catch (err) {
-    help.textContent = messageOf(err);
+    if (err instanceof OdotApiError && err.code === "INVALID_CREDENTIALS") {
+      toastSafe("이메일 또는 비밀번호를 확인해 주세요. 처음이면 회원가입을 눌러 주세요.");
+    } else if (err instanceof OdotApiError && err.code === "EMAIL_TAKEN") {
+      toastSafe("이미 가입된 이메일이에요. 로그인해 주세요.");
+      setAuthMode("login");
+    } else {
+      toastSafe(messageOf(err));
+    }
   } finally {
-    button.disabled = false;
+    submit.disabled = false;
+    submit.textContent = label;
   }
+}
+
+/* ── 로그아웃 · 프로필 ─────────────────────────────────────────────── */
+
+/**
+ * 프로필 화면은 renderProfile() 이 매번 innerHTML 로 다시 그리면서 핸들러를
+ * 새로 건다. 그래서 렌더가 끝난 뒤에 우리 것으로 덮어써야 한다.
+ */
+function installProfile() {
+  const base = window.renderProfile;
+  if (typeof base !== "function") return;
+
+  window.renderProfile = () => {
+    base();
+
+    const email = el("#profileEmail");
+    if (email) {
+      // 계정 이메일은 로그인 신원이라 프로필에서 바꾸지 않는다.
+      email.readOnly = true;
+      email.title = "계정 이메일은 변경할 수 없어요.";
+    }
+
+    const save = el("#saveProfile");
+    if (save) save.onclick = () => void saveProfile();
+
+    const logout = el("#logout");
+    if (logout) logout.onclick = () => void doLogout();
+  };
+}
+
+async function saveProfile() {
+  const name = el("#profileName")?.value.trim();
+  const notifications = el("#notificationToggle")?.checked ?? true;
+  if (!name) {
+    toastSafe("이름을 입력해 주세요.");
+    return;
+  }
+
+  try {
+    const me = await odot.updateProfile({ displayName: name, notifications });
+    writeProfile({ name: me.user.displayName, notifications: me.user.notifications });
+    toastSafe("프로필을 저장했어요.");
+    window.renderProfile();
+  } catch (err) {
+    toastSafe(messageOf(err));
+  }
+}
+
+async function doLogout() {
+  try {
+    await odot.logOut();
+  } catch {
+    // 서버 응답과 무관하게 로컬 상태는 정리한다.
+  }
+  bridge.ready = false;
+  rememberSession(null);
+  writeProfile({ signedIn: false });
+  state.interests = [];
+  state.deck = [];
+  state.current = 0;
+  syncStorage({ interests: [], reactions: [] });
+  window.showScreen("login");
+  toastSafe("로그아웃했어요.");
 }
 
 /* ── 2. 관심사 단일 선택 ───────────────────────────────────────────── */
@@ -408,15 +539,14 @@ function installRealApi() {
   });
 }
 
-/* ── 내 프로젝트 목록 (세션 전환) ──────────────────────────────────── */
+/* ── 프로젝트 목록 (친구의 #projects 화면을 실제 데이터에 연결) ────────── */
 
 /**
- * 프로젝트는 분야별로 완전히 분리된 세션이다.
- * 운동으로 시작했다가 요리가 하고 싶어지면 새 프로젝트를 열면 되고,
- * 두 프로젝트의 카드·관심 이력은 서로 섞이지 않는다.
+ * 프로토타입이 자체 프로젝트 목록 화면을 갖게 되면서, 브리지가 따로 만들던
+ * '내 프로젝트' 화면은 필요 없어졌다. 대신 친구 화면을 실제 데이터로 채운다.
  *
- * 프로토타입에는 목록 화면이 없어서 여기서 만들어 붙인다.
- * 친구 CSS 토큰(--line, --muted, 카테고리 색)을 그대로 쓴다.
+ * 프로토타입 쪽은 state.activeProjectPicks(로컬 결정 플로우) 기준으로 그리는데,
+ * 그 흐름이 아직 목이라 목록이 늘 비어 보인다. 서버 목록이 있으면 그걸 우선한다.
  */
 
 const STATUS_LABEL = {
@@ -426,138 +556,107 @@ const STATUS_LABEL = {
   failed: "생성 실패",
 };
 
-function installSessionList() {
-  injectSessionStyles();
-  injectSessionScreen();
-  injectSessionNav();
+function installProjectList() {
+  injectProjectListStyles();
 
-  // showScreen 이 이 화면으로 올 때 목록을 새로 그린다.
-  const base = window.showScreen;
-  window.showScreen = (id) => {
-    base(id);
-    // 나이 게이트가 막았을 수도 있으니, 실제로 이 화면이 떴을 때만 그린다.
-    if (id === "odotSessions" && document.querySelector(".screen.active")?.id === "odotSessions") {
-      void renderSessions();
-    }
+  const base = window.renderProjects;
+  window.renderProjects = () => {
+    base();
+    void renderRealProjects();
   };
 }
 
-function injectSessionStyles() {
-  if (document.getElementById("odotSessionStyles")) return;
+function injectProjectListStyles() {
+  if (document.getElementById("odotProjectListStyles")) return;
   const style = document.createElement("style");
-  style.id = "odotSessionStyles";
+  style.id = "odotProjectListStyles";
   style.textContent = `
-    .odot-session-list{display:flex;flex-direction:column;gap:10px;margin:16px 0 90px}
-    .odot-session{--sc:var(--gray);display:flex;gap:12px;align-items:center;width:100%;
+    .odot-project-list{display:flex;flex-direction:column;gap:10px;margin:14px 0 4px}
+    .odot-project{--sc:var(--gray);display:flex;gap:12px;align-items:center;width:100%;
       padding:14px 15px;border:1px solid var(--line);border-radius:20px;background:#fff;
       text-align:left;position:relative;overflow:hidden}
-    .odot-session:after{content:"";position:absolute;right:-26px;bottom:-30px;width:78px;height:78px;
+    .odot-project:after{content:"";position:absolute;right:-26px;bottom:-30px;width:78px;height:78px;
       border-radius:48% 52% 44% 56%;background:color-mix(in srgb,var(--sc) 13%,white)}
-    .odot-session > *{position:relative;z-index:1}
-    .odot-session img{width:42px;height:42px;object-fit:contain;flex:none}
-    .odot-session .body{flex:1;min-width:0}
-    .odot-session .name{font-size:15px;font-weight:800;letter-spacing:-.3px;
+    .odot-project > *{position:relative;z-index:1}
+    .odot-project img{width:42px;height:42px;object-fit:contain;flex:none}
+    .odot-project .body{flex:1;min-width:0}
+    .odot-project .name{font-size:15px;font-weight:800;letter-spacing:-.3px;
       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .odot-session .meta{margin-top:3px;color:var(--muted);font-size:12px;font-weight:700}
-    .odot-session .now{flex:none;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;
+    .odot-project .meta{margin-top:3px;color:var(--muted);font-size:12px;font-weight:700}
+    .odot-project .now{flex:none;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;
       background:var(--primary);color:#fff}
-    .odot-session.current{border-color:var(--primary);box-shadow:0 6px 18px #6e34cc1f}
-    .odot-new{width:100%;margin-top:4px;padding:14px;border:1px dashed #d8cec0;border-radius:20px;
-      background:#fff;color:var(--primary);font-size:14px;font-weight:800}
+    .odot-project.current{border-color:var(--primary);box-shadow:0 6px 18px #6e34cc1f}
+    .odot-project-new{width:100%;margin-top:6px;padding:14px;border:1px dashed #d8cec0;
+      border-radius:20px;background:#fff;color:var(--primary);font-size:14px;font-weight:800}
   `;
   document.head.append(style);
 }
 
-function injectSessionScreen() {
-  if (el("#odotSessions")) return;
-  const section = document.createElement("section");
-  section.id = "odotSessions";
-  section.className = "screen";
-  section.setAttribute("aria-label", "내 프로젝트");
-  section.innerHTML = `
-    <div class="topbar">
-      <div class="brand" aria-label="odot"><span class="logo-o" aria-hidden="true"></span>d<span class="logo-o second" aria-hidden="true"></span>t</div>
-      <span class="count" id="odotSessionCount">불러오는 중</span>
-    </div>
-    <p class="eyebrow">내 프로젝트</p>
-    <h1>어떤 걸<br>이어서 해볼까요?</h1>
-    <p class="sub">분야마다 따로 모아둬요. 프로젝트를 바꿔도 카드와 관심 기록이 섞이지 않아요.</p>
-    <button class="odot-new" id="odotNewSession" type="button">+ 새 프로젝트 시작하기</button>
-    <div class="odot-session-list" id="odotSessionList"></div>
-  `;
-  document.querySelector("main")?.append(section);
+async function renderRealProjects() {
+  if (!bridge.ready) return;
 
-  el("#odotNewSession").onclick = () => {
-    // 관심사 선택 화면이 곧 '새 프로젝트' 화면이다.
-    state.interests = [];
-    window.renderInterests();
-    window.showScreen("interests");
-  };
-}
-
-function injectSessionNav() {
-  const nav = document.querySelector(".bottom-nav");
-  if (!nav || nav.querySelector('[data-target="odotSessions"]')) return;
-
-  // 기존 '프로젝트' 탭은 지금 세션의 할 일 화면이라 이름을 '할 일'로 바꾼다.
-  const todoTab = nav.querySelector('[data-target="projects"]');
-  if (todoTab) {
-    const label = [...todoTab.childNodes].find((n) => n.nodeType === Node.TEXT_NODE);
-    if (label) label.textContent = "할 일";
-  }
-
-  const button = document.createElement("button");
-  button.className = "nav";
-  button.dataset.target = "odotSessions";
-  button.innerHTML =
-    '<svg viewBox="0 0 24 24"><path d="M4 5h16v3H4zM4 10.5h16v3H4zM4 16h10v3H4z"/></svg>내 프로젝트';
-  button.onclick = () => window.showScreen("odotSessions");
-  nav.prepend(button);
-}
-
-async function renderSessions() {
-  const list = el("#odotSessionList");
-  const count = el("#odotSessionCount");
-  if (!list) return;
+  const ready = el("#projectReady");
+  if (!ready) return;
 
   let projects = [];
   try {
     ({ projects } = await odot.listProjects());
-  } catch (err) {
-    list.innerHTML = `<div class="empty"><strong>목록을 불러오지 못했어요.</strong><p>${messageOf(err)}</p></div>`;
-    return;
+  } catch {
+    return; // 실패하면 프로토타입이 그린 화면을 그대로 둔다.
   }
 
-  count.textContent = `${projects.length}개`;
+  const signal = el("#projectSignal");
+  const eyebrow = el("#projects > .eyebrow");
+  const title = el("#projects > h1");
+  if (signal) signal.textContent = `프로젝트 ${projects.length}개`;
+  if (eyebrow) eyebrow.textContent = "각 목표를 각자의 속도로";
 
   if (projects.length === 0) {
-    list.innerHTML =
-      '<div class="empty"><strong>아직 시작한 프로젝트가 없어요.</strong><p>위 버튼으로 첫 프로젝트를 만들어 보세요.</p></div>';
+    if (title) title.innerHTML = "아직 시작한<br>프로젝트가 없어요.";
+    // 프로토타입의 빈 상태를 그대로 두되, 버튼만 새 프로젝트로 연결한다.
+    const find = el("#findGoal");
+    if (find) find.onclick = () => startNewProject();
     return;
   }
 
-  list.innerHTML = projects
-    .map((p) => {
-      const t = byId(p.topic);
-      const name = p.title ?? `${p.customTopic ?? t.name} 탐색`;
-      const meta = [
-        `관심 ${p.likeCount}개`,
-        `카드 ${p.reactionCount}장`,
-        STATUS_LABEL[p.status] ?? p.status,
-      ].join(" · ");
-      const current = p.id === bridge.projectId;
-      return `<button class="odot-session ${current ? "current" : ""}" data-session="${p.id}"
-        style="--sc:var(--${t.color})" type="button">
-        <img src="${t.asset}" alt="">
-        <span class="body"><span class="name">${escapeHtml(name)}</span><span class="meta">${meta}</span></span>
-        ${current ? '<span class="now">보는 중</span>' : ""}
-      </button>`;
-    })
-    .join("");
+  if (title) title.innerHTML = "어떤 걸<br>이어서 해볼까요?";
+  el("#projectLocked")?.setAttribute("hidden", "");
+  ready.hidden = false;
 
-  list.querySelectorAll("[data-session]").forEach((node) => {
-    node.onclick = () => void openSession(node.dataset.session);
+  ready.innerHTML =
+    '<div class="odot-project-list">' +
+    projects
+      .map((p) => {
+        const t = byId(p.topic);
+        const name = p.title ?? `${p.customTopic ?? t.name} 탐색`;
+        const meta = [
+          `관심 ${p.likeCount}개`,
+          `카드 ${p.reactionCount}장`,
+          STATUS_LABEL[p.status] ?? p.status,
+        ].join(" · ");
+        const current = p.id === bridge.projectId;
+        return `<button class="odot-project ${current ? "current" : ""}" data-project="${p.id}"
+          style="--sc:var(--${t.color})" type="button">
+          <img src="${t.asset}" alt="">
+          <span class="body"><span class="name">${escapeHtml(name)}</span><span class="meta">${meta}</span></span>
+          ${current ? '<span class="now">보는 중</span>' : ""}
+        </button>`;
+      })
+      .join("") +
+    "</div>" +
+    '<button class="odot-project-new" id="odotNewProject" type="button">+ 새 프로젝트 시작하기</button>';
+
+  ready.querySelectorAll("[data-project]").forEach((node) => {
+    node.onclick = () => void openSession(node.dataset.project);
   });
+  el("#odotNewProject").onclick = () => startNewProject();
+}
+
+/** 관심사 선택 화면이 곧 '새 프로젝트' 화면이다. */
+function startNewProject() {
+  state.interests = [];
+  window.renderInterests();
+  window.showScreen("interests");
 }
 
 /** 다른 프로젝트로 갈아탄다. 덱과 관심 이력이 그 프로젝트 것으로 완전히 바뀐다. */
@@ -908,22 +1007,23 @@ async function boot() {
   const now = new Date();
   state.calendarMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  installAgeGate();
+  installAuth();
+  installProfile();
   installSingleSelectInterests();
   installRealApi();
   installSummaryPrefetch();
   installTodoPersistence();
   installShare();
   installReviewCopyFix();
-  installSessionList();
+  installProjectList();
 
   try {
-    const session = await odot.ensureUser();
-    if (session.needsAge) {
-      // 나이를 아직 안 받았다 — 온보딩을 보다가 넘어갈 때 나이 화면이 뜬다.
+    if (!odot.isLoggedIn()) {
+      // 아직 로그인 전 — 온보딩을 벗어나면 로그인 화면이 뜬다.
       window.renderInterests();
       return;
     }
+    await odot.getMe(); // 토큰이 아직 유효한지 확인
     bridge.ready = true;
     await hydrate();
   } catch (err) {

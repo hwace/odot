@@ -36,6 +36,7 @@ export async function signUp(input: {
   email: string;
   password: string;
   age: number;
+  displayName?: string;
 }): Promise<AuthResult> {
   const email = normalizeEmail(input.email);
 
@@ -61,7 +62,12 @@ export async function signUp(input: {
 
   const profile = await db()
     .from("users")
-    .insert({ auth_user_id: authUserId, email, age: input.age })
+    .insert({
+      auth_user_id: authUserId,
+      email,
+      age: input.age,
+      display_name: input.displayName?.trim() || null,
+    })
     .select(USER_COLUMNS)
     .single();
 

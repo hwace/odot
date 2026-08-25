@@ -10,28 +10,42 @@ export const dynamic = "force-dynamic";
 /** GET /api/me — 현재 사용자 + 모든 프로젝트를 합친 누적 통계 */
 export const GET = withRoute(async (req) => ok(await loadMe(await requireUser(req))));
 
-const PatchSchema = z.object({
-  age: z.number().int().min(MIN_AGE).max(MAX_AGE),
-});
+const PatchSchema = z
+  .object({
+    age: z.number().int().min(MIN_AGE).max(MAX_AGE).optional(),
+    displayName: z.string().trim().min(1).max(20).optional(),
+    notifications: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "바꿀 값이 없습니다." });
 
 /**
- * PATCH /api/me — 나이 수정.
+ * PATCH /api/me — 프로필 수정 (나이 · 이름 · 알림).
+ * 셋 다 선택이고, 준 것만 바뀐다.
+ *
  * 나이가 바뀌면 연령 정책도 즉시 바뀌므로, 아직 반응하지 않은 카드 중
  * 새 나이로는 볼 수 없는 카드를 함께 정리한다.
  */
 export const PATCH = withRoute(async (req) => {
   const user = await requireUser(req);
-  const { age } = PatchSchema.parse(await readJson(req));
+  const patch = PatchSchema.parse(await readJson(req));
+
+  const update: Record<string, unknown> = {};
+  if (patch.age !== undefined) update.age = patch.age;
+  if (patch.displayName !== undefined) update.display_name = patch.displayName;
+  if (patch.notifications !== undefined) update.notifications = patch.notifications;
 
   const { data, error } = await db()
     .from("users")
-    .update({ age })
+    .update(update)
     .eq("id", user.id)
     .select(USER_COLUMNS)
     .single();
   if (error) throw error;
 
-  await db().from("keyword_cards").delete().eq("user_id", user.id).gt("min_age", age);
+  // 나이가 낮아지면 새 나이로는 볼 수 없는 미반응 카드를 정리한다.
+  if (patch.age !== undefined) {
+    await db().from("keyword_cards").delete().eq("user_id", user.id).gt("min_age", patch.age);
+  }
 
   return ok(await loadMe(data as UserRow));
 });

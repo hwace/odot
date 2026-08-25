@@ -48,6 +48,10 @@ export interface User {
   id: string;
   /** 이메일 계정으로 가입한 경우. 익명 과도기 경로면 null */
   email: string | null;
+  /** 프로필 화면에 보여줄 이름. 안 정했으면 이메일 앞부분 */
+  displayName: string;
+  /** 알림 받기 설정 (발송은 아직 미구현) */
+  notifications: boolean;
   age: number;
   ageGroup: AgeGroup;
   isMinor: boolean;

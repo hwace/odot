@@ -165,6 +165,9 @@ async function request(path, options = {}) {
 export const odot = {
   /* ── 계정 ───────────────────────────────────────────────── */
 
+  /** 저장된 세션이 있는지. 토큰 유효성까지 보려면 getMe() 를 부른다. */
+  isLoggedIn,
+
   /** 회원가입. 성공하면 바로 로그인된 상태가 된다. */
   async signUp({ email, password, age }) {
     const data = await request("/api/auth/signup", {
@@ -244,6 +247,9 @@ export const odot = {
   getMe: () => request("/api/me"),
 
   updateAge: (age) => request("/api/me", { method: "PATCH", body: { age } }),
+
+  /** 프로필 수정 (이름 · 알림 · 나이). 준 값만 바뀐다. */
+  updateProfile: (patch) => request("/api/me", { method: "PATCH", body: patch }),
 
   /* ── 관심사 주제 ────────────────────────────────────────── */
 

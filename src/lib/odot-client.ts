@@ -163,6 +163,9 @@ const json = (body: unknown) => JSON.stringify(body);
 export const odot = {
   /* ── 계정 ───────────────────────────────────────────────── */
 
+  /** 저장된 세션이 있는지. 토큰 유효성까지 보려면 getMe() 를 부른다. */
+  isLoggedIn,
+
   /** 회원가입. 성공하면 바로 로그인된 상태가 된다. */
   async signUp(input: { email: string; password: string; age: number }): Promise<AuthResult> {
     const data = await request<AuthResult>("/api/auth/signup", {
@@ -217,6 +220,10 @@ export const odot = {
   /** 나이 수정. 연령 정책이 바로 다시 적용된다. */
   updateAge: (age: number) =>
     request<MeResponse>("/api/me", { method: "PATCH", body: json({ age }) }),
+
+  /** 프로필 수정 (이름 · 알림 · 나이). 준 값만 바뀐다. */
+  updateProfile: (patch: { displayName?: string; notifications?: boolean; age?: number }) =>
+    request<MeResponse>("/api/me", { method: "PATCH", body: json(patch) }),
 
   /* ── 관심사 주제 ────────────────────────────────────────── */
 

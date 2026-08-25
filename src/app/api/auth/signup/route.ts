@@ -10,6 +10,8 @@ const BodySchema = z.object({
   email: z.email("이메일 형식이 올바르지 않습니다."),
   password: z.string().min(8, "비밀번호는 8자 이상이어야 합니다.").max(72),
   age: z.number().int().min(MIN_AGE).max(MAX_AGE),
+  /** 프로필 이름. 없으면 이메일 앞부분을 쓴다. */
+  displayName: z.string().trim().min(1).max(20).optional(),
 });
 
 /**

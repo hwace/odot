@@ -24,6 +24,8 @@ export interface UserRow {
   device_id: string | null;
   auth_user_id: string | null;
   email: string | null;
+  display_name: string | null;
+  notifications: boolean;
   age: number;
   age_group: AgeGroup;
   is_minor: boolean;
@@ -32,12 +34,15 @@ export interface UserRow {
 }
 
 export const USER_COLUMNS =
-  "id, device_id, auth_user_id, email, age, age_group, is_minor, created_at, last_active_at";
+  "id, device_id, auth_user_id, email, display_name, notifications, age, age_group, is_minor, created_at, last_active_at";
 
 export function toUser(row: UserRow): User {
   return {
     id: row.id,
     email: row.email,
+    // 이름을 안 정했으면 이메일 앞부분을 쓴다.
+    displayName: row.display_name?.trim() || row.email?.split("@")[0] || "나",
+    notifications: row.notifications,
     age: row.age,
     ageGroup: row.age_group,
     isMinor: row.is_minor,
