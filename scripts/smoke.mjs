@@ -295,6 +295,12 @@ async function main() {
   const [w, h] = [png.readUInt32BE(16), png.readUInt32BE(20)];
   check("공유 이미지 9:16 (1080x1920)", w === 1080 && h === 1920, `${w}x${h}`);
   note(`${(png.byteLength / 1024).toFixed(0)} KB · ${w}x${h}`);
+  // SAVE_IMAGE=경로 를 주면 받은 이미지를 파일로 남긴다.
+  // 배포한 서버에서 한글이 제대로 그려졌는지 눈으로 볼 때 쓴다.
+  if (process.env.SAVE_IMAGE) {
+    (await import("node:fs")).writeFileSync(process.env.SAVE_IMAGE, png);
+    note(`이미지 저장: ${process.env.SAVE_IMAGE}`);
+  }
   check("공유 기록", (await call("POST", `/api/reports/monthly/${month}/share`, { result: "success" })).data?.log?.result === "success");
 
   step("11. 연령 검열");

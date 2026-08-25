@@ -4,6 +4,15 @@
  * next/og(satori)는 파일 하나를 통째로 넣는 편이 안전해서, 스프라이트를
  * 런타임에 잘라 쓰지 않고 여기서 미리 잘라 `src/og-assets/` 에 넣는다.
  * 자산 원본이 바뀌면 `npm run build:og-assets` 로 다시 만든다.
+ *
+ * 폰트(src/og-assets/Pretendard-ExtraBold.subset.ttf)는 이 스크립트가 만들지
+ * 않는다. Pretendard v1.3.9 의 ExtraBold 에서 한글·라틴만 남겨 2MB 로 추린
+ * 것이고, 저장소에 그대로 들어 있다. 다시 만들 일이 생기면:
+ *
+ *   npm i -D pretendard && pip install fonttools
+ *   python -m fontTools.subset  *     node_modules/pretendard/dist/public/static/alternative/Pretendard-ExtraBold.ttf  *     --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2027,U+2030-205E,U+20A0-20BF, *                 U+2190-2193,U+3000-303F,U+1100-11FF,U+3130-318F,U+AC00-D7A3,U+FF01-FF60"  *     --layout-features='*' --no-hinting --desubroutinize  *     --output-file=src/og-assets/Pretendard-ExtraBold.subset.ttf
+ *
+ * 빌드마다 90MB 짜리 폰트 패키지를 받지 않으려고 의존성에서 빼 두었다.
  */
 import sharp from "sharp";
 
