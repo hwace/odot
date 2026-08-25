@@ -10,7 +10,6 @@ export const GET = withRoute(async () =>
     env: {
       supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
       openai: Boolean(process.env.OPENAI_API_KEY),
-      naver: Boolean(process.env.NAVER_CLIENT_ID && process.env.NAVER_CLIENT_SECRET),
     },
   }),
 );

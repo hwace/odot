@@ -69,7 +69,6 @@ async function main() {
     console.log("\nSUPABASE_SERVICE_ROLE_KEY 가 없어 중단합니다.");
     process.exit(1);
   }
-  note(`네이버 데이터랩: ${health.data?.env?.naver ? "설정됨" : "미설정 (기본 순서로 대체)"}`);
 
   step("1. 인증");
   const noAuth = await call("GET", "/api/me", undefined, { auth: false });
@@ -116,8 +115,8 @@ async function main() {
   note(`카드: ${deck1.cards.map((c) => c.keyword).join(" / ")}`);
 
   check(
-    "첫 덱은 AI 대기 없이 트렌드/기본에서 온다",
-    deck1.cards.every((c) => c.source === "trend" || c.source === "default"),
+    "첫 덱은 AI 대기 없이 시드 풀에서 온다",
+    deck1.cards.every((c) => c.source === "default"),
     [...new Set(deck1.cards.map((c) => c.source))],
   );
   check("첫 덱 생성이 5초 안에 끝난다", elapsed < 5000, `${elapsed}ms`);

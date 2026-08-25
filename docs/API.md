@@ -42,7 +42,7 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 
 | 카드 | 어디서 오나 | 걸리는 시간 |
 | --- | --- | --- |
-| 1~5번 | 트렌드/기본 키워드 (AI 호출 없음) | ~0.4초 |
+| 1~5번 | 큐레이션 시드 키워드 (AI 호출 없음) | ~0.4초 |
 | 6번부터 | AI 생성 — 앞선 카드를 볼 때 미리 만들어 둠 | 사용자는 대기 없음 |
 
 `POST /api/projects/:id/cards/prefetch` 를 **카드를 한 장 넘길 때마다** 부르면 됩니다.
@@ -177,10 +177,9 @@ const { project: done } = await odot.createTodos(project.id, "1w");
   "deck": {
     "projectId": "…",
     "cards": [{ "id": "…", "keyword": "코딩", "intro": "컴퓨터에게 일을 시키는 언어",
-                "reason": "요즘 많이 찾는 주제예요.", "category": "study",
-                "source": "trend", "createdAt": "…" }],
-    "remaining": 5,
-    "usedFallback": false
+                "reason": "지금 해볼 만한 주제예요.", "category": "study",
+                "source": "default", "createdAt": "…" }],
+    "remaining": 5
   }
 }
 ```
@@ -217,13 +216,13 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 ### `GET /api/projects/:projectId/cards?limit=5` · 덱
 
 ```jsonc
-{ "projectId": "…", "cards": [ … ], "remaining": 8, "usedFallback": false }
+{ "projectId": "…", "cards": [ … ], "remaining": 8 }
 ```
 
 - 반응이 확정된 카드는 **절대 다시 나오지 않습니다.**
-- 덱이 비어 있으면 트렌드 키워드로 **즉시** 채웁니다 (AI 대기 없음).
+- 덱이 비어 있으면 시드 키워드로 **즉시** 채웁니다 (AI 대기 없음).
 - `easySummary`는 여기 오지 않습니다 — 위로 스와이프할 때 받습니다.
-- `source`: `trend`(데이터랩 순위) · `default`(기본 풀) · `ai`(생성)
+- `source`: `default`(큐레이션 시드 풀) · `ai`(생성)
 
 ### `POST /api/projects/:projectId/cards/prefetch` · 미리 만들기
 

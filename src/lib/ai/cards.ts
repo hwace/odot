@@ -37,8 +37,8 @@ export interface CardGenerationInput {
   passedKeywords: string[];
   /** 이 프로젝트에서 이미 나온 키워드 — 다시 내보내면 안 된다 */
   excludeKeywords: string[];
-  /** 트렌드 소스에서 가져온 참고 키워드 */
-  trendKeywords: string[];
+  /** 아직 안 쓴 시드 키워드 — 갈래를 넓히는 참고용 */
+  seedHints: string[];
   count: number;
 }
 
@@ -94,8 +94,8 @@ export async function generateCards(
     input.passedKeywords.length
       ? `관심 없다고 넘긴 키워드: ${input.passedKeywords.slice(0, 20).join(", ")}`
       : "",
-    input.trendKeywords.length
-      ? `요즘 많이 검색되는 키워드(참고용): ${input.trendKeywords.slice(0, 15).join(", ")}`
+    input.seedHints.length
+      ? `참고할 만한 다른 갈래: ${input.seedHints.slice(0, 15).join(", ")}`
       : "",
     input.excludeKeywords.length
       ? `이미 보여준 키워드라 절대 다시 쓰면 안 되는 것: ${input.excludeKeywords.slice(0, 80).join(", ")}`

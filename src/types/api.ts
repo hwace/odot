@@ -89,7 +89,8 @@ export interface TopicOption {
 
 /* ─── 키워드 카드 (F-OVNIBD, F-ZSDXRA) ──────────────────────────────── */
 
-export type CardSource = "ai" | "trend" | "default" | "similar_user";
+/** 카드 출처. `default` = 큐레이션 시드 풀, `ai` = 생성 */
+export type CardSource = "default" | "ai";
 
 export interface KeywordCard {
   id: string;
@@ -109,8 +110,6 @@ export interface CardDeck {
   cards: KeywordCard[];
   /** 아직 반응하지 않은 카드 총 장수 */
   remaining: number;
-  /** true면 트렌드 소스를 못 써서 기본 키워드로 채웠다는 뜻 */
-  usedFallback: boolean;
 }
 
 /** 위로 스와이프했을 때 보여주는, 초등학생도 이해할 수 있는 1~2문장 요약 */

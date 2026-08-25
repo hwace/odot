@@ -53,7 +53,7 @@ const BodySchema = z.object({
  * POST /api/projects — 새 세션을 연다.
  *
  * 관심사 하나를 고르면 프로젝트가 만들어지고, **첫 카드 덱이 함께 옵니다.**
- * 첫 덱은 트렌드 키워드로 즉시 채워지므로 AI 생성을 기다리지 않습니다.
+ * 첫 덱은 시드 키워드로 즉시 채워지므로 AI 생성을 기다리지 않습니다.
  *
  * 이 프로젝트의 카드와 스와이프 이력은 이 안에만 쌓이고,
  * 다른 프로젝트를 열면 완전히 새 데이터에서 시작합니다.
@@ -69,7 +69,6 @@ export const POST = withRoute(async (req) => {
   void logEvent(user.id, "card_impression", {
     projectId: project.id,
     count: deck.cards.length,
-    usedFallback: deck.usedFallback,
   });
 
   return ok({ project, deck });

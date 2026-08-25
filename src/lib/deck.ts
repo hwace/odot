@@ -1,6 +1,6 @@
 import { db } from "@/lib/supabase";
 import { generateCards } from "@/lib/ai/cards";
-import { fetchDefaults, fetchTrending } from "@/lib/trends";
+import { fetchSeedKeywords } from "@/lib/trends";
 import { screenLocal } from "@/lib/moderation";
 import { toCard, type CardRow } from "@/lib/mappers";
 import {
@@ -18,7 +18,7 @@ import type { CardDeck, TopicId } from "@/types/api";
  *
  * 기다리지 않게 만드는 게 핵심이다:
  *
- *   · 첫 덱(1~5번)은 **트렌드 키워드로 즉시** 만든다. AI 호출이 없어서 바로 나온다.
+ *   · 첫 덱(1~5번)은 **큐레이션 시드 키워드로 즉시** 만든다. AI 호출이 없어서 바로 나온다.
  *   · 2번 카드를 볼 때쯤 6번 카드를 미리 만들어 둔다 (prefetchDeck).
  *     그래서 사용자가 카드를 넘길 때 생성 대기가 생기지 않는다.
  *
@@ -36,20 +36,17 @@ export async function getDeck(
   size = DEFAULT_DECK_SIZE,
 ): Promise<CardDeck> {
   let cards = await fetchUnreacted(project.id, user.age, size);
-  let usedFallback = false;
 
   if (cards.length === 0) {
-    // 첫 진입 — AI를 기다리지 않도록 트렌드 키워드로 즉시 채운다.
-    const seeded = await seedFromTrend(user, project, size);
-    usedFallback = seeded.usedFallback;
-    if (seeded.count > 0) cards = await fetchUnreacted(project.id, user.age, size);
+    // 첫 진입 — AI를 기다리지 않도록 시드 키워드로 즉시 채운다.
+    const seeded = await seedFromPool(user, project, size);
+    if (seeded > 0) cards = await fetchUnreacted(project.id, user.age, size);
   }
 
   return {
     projectId: project.id,
     cards: cards.map(toCard),
     remaining: await countRemaining(project.id, user.age),
-    usedFallback,
   };
 }
 
@@ -151,18 +148,17 @@ async function usedKeywords(projectId: string): Promise<string[]> {
   return (data ?? []).map((c) => (c as { keyword: string }).keyword);
 }
 
-/** 첫 덱 — 트렌드 키워드로 즉시 채운다 (AI 대기 없음) */
-async function seedFromTrend(
+/** 첫 덱 — 큐레이션 시드 키워드로 즉시 채운다 (AI 대기 없음) */
+async function seedFromPool(
   user: UserRow,
   project: ProjectRow,
   size: number,
-): Promise<{ count: number; usedFallback: boolean }> {
+): Promise<number> {
   const topic = (project.topic ?? "etc") as TopicId;
   const exclude = await usedKeywords(project.id);
 
-  const { keywords, usedFallback } = await fetchTrending([topic], size, exclude);
-  const pool = keywords.length > 0 ? keywords : await fetchDefaults([topic], size, exclude);
-  if (pool.length === 0) return { count: 0, usedFallback: true };
+  const pool = await fetchSeedKeywords([topic], size, exclude);
+  if (pool.length === 0) return 0;
 
   // 시드는 우리가 직접 작성해 넣은 목록이라 로컬 검사(금칙어 + 최소 연령)면 충분하다.
   // 모델 호출을 건너뛰므로 첫 덱이 곧바로 나온다.
@@ -171,23 +167,21 @@ async function seedFromTrend(
     (s) => ({ text: `${s.keyword} ${s.intro}`, minAge: s.min_age }),
     { userId: user.id, age: user.age, source: "card" },
   );
-  if (passed.length === 0) return { count: 0, usedFallback };
+  if (passed.length === 0) return 0;
 
-  const inserted = await insertCards(
+  return insertCards(
     project.id,
     user.id,
     passed.map((s) => ({
       keyword: s.keyword,
       intro: s.intro,
-      reason: usedFallback ? "지금 해볼 만한 주제예요." : "요즘 많이 찾는 주제예요.",
+      reason: "지금 해볼 만한 주제예요.",
       easy_summary: null,
       category: s.category,
-      source: usedFallback ? "default" : "trend",
+      source: "default",
       min_age: s.min_age,
     })),
   );
-
-  return { count: inserted, usedFallback };
 }
 
 /** 뒤쪽 카드 — AI 로 취향에 맞춰 만든다 */
@@ -214,7 +208,8 @@ async function generateInto(
     .map((r) => r.keyword);
   const passedKeywords = reactions.filter((r) => r.reaction === "pass").map((r) => r.keyword);
 
-  const { keywords: trend } = await fetchTrending([topic], 12, exclude);
+  // 아직 안 쓴 시드 키워드를 참고 재료로 함께 넘긴다.
+  const seedHints = await fetchSeedKeywords([topic], 12, exclude);
 
   try {
     const generated = await generateCards({
@@ -225,7 +220,7 @@ async function generateInto(
       likedKeywords,
       passedKeywords,
       excludeKeywords: exclude,
-      trendKeywords: trend.map((t) => t.keyword),
+      seedHints: seedHints.map((t) => t.keyword),
       count: need,
     });
 
@@ -248,9 +243,8 @@ async function generateInto(
     console.error("[odot] 카드 생성 실패, 기본 풀로 대체", err);
   }
 
-  // AI 실패 — 트렌드/기본 풀로 채운다.
-  const seeded = await seedFromTrend(user, project, need);
-  return seeded.count;
+  // AI 실패 — 시드 풀로 채운다.
+  return seedFromPool(user, project, need);
 }
 
 /**
