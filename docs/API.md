@@ -43,6 +43,7 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 | 카드 | 어디서 오나 | 걸리는 시간 |
 | --- | --- | --- |
 | 1~5번 | 큐레이션 시드 키워드 (AI 호출 없음) | ~0.4초 |
+| 1~5번 (직접 입력 주제) | AI 생성 — 시드 풀로는 맞출 수 없어서 | 5~10초 |
 | 6번부터 | AI 생성 — 앞선 카드를 볼 때 미리 만들어 둠 | 사용자는 대기 없음 |
 
 `POST /api/projects/:id/cards/prefetch` 를 **카드를 한 장 넘길 때마다** 부르면 됩니다.
@@ -186,6 +187,9 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 
 - **첫 덱이 응답에 동봉되므로 카드 요청을 따로 할 필요가 없습니다.**
 - `customTopic`도 연령 검열을 거칩니다 → 걸리면 `AGE_RESTRICTED`.
+- **`customTopic` 을 준 경우 첫 덱을 AI 가 만들어서 5~10초 걸립니다.** 시드 풀은 7개 카테고리용이라
+  "요리" 같은 주제를 맞출 수 없기 때문입니다 (요리 프로젝트에 캘리그라피가 나오면 안 되니까).
+  진행 상태를 띄워두세요.
 - `status`: `collecting`(카드 모으는 중) → `generating` → `ready` / `failed`
 
 ### `GET /api/projects/:projectId` · 세션 열기

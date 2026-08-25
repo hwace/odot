@@ -283,6 +283,14 @@ function installRealApi() {
     if (!name) return;
     const known = byName(name);
 
+    // 직접 입력한 주제는 첫 덱부터 AI 가 만들어서 몇 초 걸린다.
+    const start = el("#startExplore");
+    const startLabel = start?.textContent;
+    if (start) {
+      start.disabled = true;
+      start.textContent = known ? "카드를 준비하는 중…" : "주제에 맞는 카드를 만드는 중…";
+    }
+
     try {
       const { project } = await odot.createProject(
         known && known.id !== "etc"
@@ -295,6 +303,11 @@ function installRealApi() {
       const help = el("#customHelp");
       if (help) help.textContent = messageOf(err);
       throw err;
+    } finally {
+      if (start) {
+        start.disabled = false;
+        start.textContent = startLabel;
+      }
     }
   };
 
@@ -393,6 +406,193 @@ function installRealApi() {
       return [];
     }
   });
+}
+
+/* ── 내 프로젝트 목록 (세션 전환) ──────────────────────────────────── */
+
+/**
+ * 프로젝트는 분야별로 완전히 분리된 세션이다.
+ * 운동으로 시작했다가 요리가 하고 싶어지면 새 프로젝트를 열면 되고,
+ * 두 프로젝트의 카드·관심 이력은 서로 섞이지 않는다.
+ *
+ * 프로토타입에는 목록 화면이 없어서 여기서 만들어 붙인다.
+ * 친구 CSS 토큰(--line, --muted, 카테고리 색)을 그대로 쓴다.
+ */
+
+const STATUS_LABEL = {
+  collecting: "카드 모으는 중",
+  generating: "할 일 만드는 중",
+  ready: "할 일 준비됨",
+  failed: "생성 실패",
+};
+
+function installSessionList() {
+  injectSessionStyles();
+  injectSessionScreen();
+  injectSessionNav();
+
+  // showScreen 이 이 화면으로 올 때 목록을 새로 그린다.
+  const base = window.showScreen;
+  window.showScreen = (id) => {
+    base(id);
+    // 나이 게이트가 막았을 수도 있으니, 실제로 이 화면이 떴을 때만 그린다.
+    if (id === "odotSessions" && document.querySelector(".screen.active")?.id === "odotSessions") {
+      void renderSessions();
+    }
+  };
+}
+
+function injectSessionStyles() {
+  if (document.getElementById("odotSessionStyles")) return;
+  const style = document.createElement("style");
+  style.id = "odotSessionStyles";
+  style.textContent = `
+    .odot-session-list{display:flex;flex-direction:column;gap:10px;margin:16px 0 90px}
+    .odot-session{--sc:var(--gray);display:flex;gap:12px;align-items:center;width:100%;
+      padding:14px 15px;border:1px solid var(--line);border-radius:20px;background:#fff;
+      text-align:left;position:relative;overflow:hidden}
+    .odot-session:after{content:"";position:absolute;right:-26px;bottom:-30px;width:78px;height:78px;
+      border-radius:48% 52% 44% 56%;background:color-mix(in srgb,var(--sc) 13%,white)}
+    .odot-session > *{position:relative;z-index:1}
+    .odot-session img{width:42px;height:42px;object-fit:contain;flex:none}
+    .odot-session .body{flex:1;min-width:0}
+    .odot-session .name{font-size:15px;font-weight:800;letter-spacing:-.3px;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .odot-session .meta{margin-top:3px;color:var(--muted);font-size:12px;font-weight:700}
+    .odot-session .now{flex:none;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;
+      background:var(--primary);color:#fff}
+    .odot-session.current{border-color:var(--primary);box-shadow:0 6px 18px #6e34cc1f}
+    .odot-new{width:100%;margin-top:4px;padding:14px;border:1px dashed #d8cec0;border-radius:20px;
+      background:#fff;color:var(--primary);font-size:14px;font-weight:800}
+  `;
+  document.head.append(style);
+}
+
+function injectSessionScreen() {
+  if (el("#odotSessions")) return;
+  const section = document.createElement("section");
+  section.id = "odotSessions";
+  section.className = "screen";
+  section.setAttribute("aria-label", "내 프로젝트");
+  section.innerHTML = `
+    <div class="topbar">
+      <div class="brand" aria-label="odot"><span class="logo-o" aria-hidden="true"></span>d<span class="logo-o second" aria-hidden="true"></span>t</div>
+      <span class="count" id="odotSessionCount">불러오는 중</span>
+    </div>
+    <p class="eyebrow">내 프로젝트</p>
+    <h1>어떤 걸<br>이어서 해볼까요?</h1>
+    <p class="sub">분야마다 따로 모아둬요. 프로젝트를 바꿔도 카드와 관심 기록이 섞이지 않아요.</p>
+    <button class="odot-new" id="odotNewSession" type="button">+ 새 프로젝트 시작하기</button>
+    <div class="odot-session-list" id="odotSessionList"></div>
+  `;
+  document.querySelector("main")?.append(section);
+
+  el("#odotNewSession").onclick = () => {
+    // 관심사 선택 화면이 곧 '새 프로젝트' 화면이다.
+    state.interests = [];
+    window.renderInterests();
+    window.showScreen("interests");
+  };
+}
+
+function injectSessionNav() {
+  const nav = document.querySelector(".bottom-nav");
+  if (!nav || nav.querySelector('[data-target="odotSessions"]')) return;
+
+  // 기존 '프로젝트' 탭은 지금 세션의 할 일 화면이라 이름을 '할 일'로 바꾼다.
+  const todoTab = nav.querySelector('[data-target="projects"]');
+  if (todoTab) {
+    const label = [...todoTab.childNodes].find((n) => n.nodeType === Node.TEXT_NODE);
+    if (label) label.textContent = "할 일";
+  }
+
+  const button = document.createElement("button");
+  button.className = "nav";
+  button.dataset.target = "odotSessions";
+  button.innerHTML =
+    '<svg viewBox="0 0 24 24"><path d="M4 5h16v3H4zM4 10.5h16v3H4zM4 16h10v3H4z"/></svg>내 프로젝트';
+  button.onclick = () => window.showScreen("odotSessions");
+  nav.prepend(button);
+}
+
+async function renderSessions() {
+  const list = el("#odotSessionList");
+  const count = el("#odotSessionCount");
+  if (!list) return;
+
+  let projects = [];
+  try {
+    ({ projects } = await odot.listProjects());
+  } catch (err) {
+    list.innerHTML = `<div class="empty"><strong>목록을 불러오지 못했어요.</strong><p>${messageOf(err)}</p></div>`;
+    return;
+  }
+
+  count.textContent = `${projects.length}개`;
+
+  if (projects.length === 0) {
+    list.innerHTML =
+      '<div class="empty"><strong>아직 시작한 프로젝트가 없어요.</strong><p>위 버튼으로 첫 프로젝트를 만들어 보세요.</p></div>';
+    return;
+  }
+
+  list.innerHTML = projects
+    .map((p) => {
+      const t = byId(p.topic);
+      const name = p.title ?? `${p.customTopic ?? t.name} 탐색`;
+      const meta = [
+        `관심 ${p.likeCount}개`,
+        `카드 ${p.reactionCount}장`,
+        STATUS_LABEL[p.status] ?? p.status,
+      ].join(" · ");
+      const current = p.id === bridge.projectId;
+      return `<button class="odot-session ${current ? "current" : ""}" data-session="${p.id}"
+        style="--sc:var(--${t.color})" type="button">
+        <img src="${t.asset}" alt="">
+        <span class="body"><span class="name">${escapeHtml(name)}</span><span class="meta">${meta}</span></span>
+        ${current ? '<span class="now">보는 중</span>' : ""}
+      </button>`;
+    })
+    .join("");
+
+  list.querySelectorAll("[data-session]").forEach((node) => {
+    node.onclick = () => void openSession(node.dataset.session);
+  });
+}
+
+/** 다른 프로젝트로 갈아탄다. 덱과 관심 이력이 그 프로젝트 것으로 완전히 바뀐다. */
+async function openSession(projectId) {
+  if (!projectId) return;
+  try {
+    const { project, eligibility } = await odot.getProject(projectId);
+    rememberSession(project.id);
+
+    const label = project.customTopic ?? byId(project.topic).name;
+    state.interests = [label];
+    syncStorage({
+      interests: state.interests,
+      reactions: eligibility.likedKeywords.map((keyword) => ({
+        type: "like",
+        category: label,
+        keyword,
+      })),
+    });
+
+    // 이전 세션의 덱을 완전히 버리고 이 프로젝트 것으로 채운다.
+    state.deck = await MockAPI.getRecommendations();
+    state.current = 0;
+    window.renderInterests();
+    window.renderDeck();
+    window.showScreen("explore");
+  } catch (err) {
+    toastSafe(messageOf(err));
+  }
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+  );
 }
 
 /* ── 덱 보충 ───────────────────────────────────────────────────────── */
@@ -715,6 +915,7 @@ async function boot() {
   installTodoPersistence();
   installShare();
   installReviewCopyFix();
+  installSessionList();
 
   try {
     const session = await odot.ensureUser();

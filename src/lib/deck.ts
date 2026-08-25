@@ -38,8 +38,15 @@ export async function getDeck(
   let cards = await fetchUnreacted(project.id, user.age, size);
 
   if (cards.length === 0) {
-    // 첫 진입 — AI를 기다리지 않도록 시드 키워드로 즉시 채운다.
-    const seeded = await seedFromPool(user, project, size);
+    // 첫 진입.
+    //
+    // 7개 카테고리는 시드 풀로 즉시 채운다 (AI 대기 없음).
+    // 다만 '기타'에 직접 입력한 주제(예: 요리)는 시드 풀로 맞출 수 없다 —
+    // 요리 프로젝트에 캘리그라피·일기가 나오면 안 되므로, 이때는
+    // 처음부터 AI로 만든다. 몇 초 걸리는 대신 주제에 맞는 카드가 나온다.
+    const seeded = project.custom_topic
+      ? await generateInto(user, project, size)
+      : await seedFromPool(user, project, size);
     if (seeded > 0) cards = await fetchUnreacted(project.id, user.age, size);
   }
 

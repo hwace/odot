@@ -81,8 +81,10 @@ export async function generateCards(
     "모든 문장은 한국어로 쓴다.",
   ].join("\n");
 
+  // 직접 입력한 주제는 그 자체가 프로젝트의 정체다.
+  // "기타"라는 큰 분류보다 입력값이 우선이어야 한다.
   const interest = input.customTopic
-    ? `${TOPIC_LABEL[input.topic]} (직접 입력: ${input.customTopic})`
+    ? `${input.customTopic} (사용자가 직접 입력한 주제 — 반드시 이 주제 안에서 뽑을 것)`
     : TOPIC_LABEL[input.topic];
 
   const user = [
