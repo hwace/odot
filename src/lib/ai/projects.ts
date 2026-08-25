@@ -48,6 +48,8 @@ export interface ProjectGenerationInput {
   duration: ProjectDuration;
   /** 프로젝트 전용 세션 키. 프로젝트끼리 맥락이 섞이지 않게 하는 격리 키. */
   sessionKey: string;
+  /** 후보군에서 사용자가 고른 목표. 있으면 이걸 중심으로 만든다. */
+  goal?: { title: string; why?: string };
 }
 
 /**
@@ -88,8 +90,13 @@ export async function generateProject(
     `대표 관심 카테고리: ${TOPIC_LABEL[input.representativeCategory]}`,
     `관심을 표시한 키워드: ${input.likedKeywords.slice(0, 20).join(", ")}`,
     `수행 기간: ${plan.label}`,
+    // 사용자가 후보군에서 고른 목표가 있으면 그게 최우선이다.
+    input.goal ? `사용자가 고른 목표: ${input.goal.title}` : "",
+    input.goal?.why ? `그 목표를 고른 이유: ${input.goal.why}` : "",
     "",
-    `위 관심 키워드를 조합해서 ${plan.label} 동안 진행할 프로젝트 1개와 할 일 ${plan.todoCount}개를 만들어줘.`,
+    input.goal
+      ? `'${input.goal.title}' 을 ${plan.label} 안에 해내기 위한 할 일 ${plan.todoCount}개를 만들어줘. 제목도 이 목표에 맞춰줘.`
+      : `위 관심 키워드를 조합해서 ${plan.label} 동안 진행할 프로젝트 1개와 할 일 ${plan.todoCount}개를 만들어줘.`,
     `할 일은 ${plan.label} 안에 실제로 끝낼 수 있는 분량이어야 하고, 권장 시점을 ${plan.unit}로 고르게 나눠줘.`,
   ].join("\n");
 

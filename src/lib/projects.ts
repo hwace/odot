@@ -109,6 +109,8 @@ export async function generateTodos(
   project: ProjectRow,
   sessionKey: string,
   duration: ProjectDuration,
+  /** 후보군에서 고른 목표. 있으면 그 목표를 중심으로 만든다. */
+  goal?: { title: string; why?: string },
 ): Promise<Project> {
   const eligibility = await computeEligibility(project);
   if (!eligibility.eligible) {
@@ -145,6 +147,7 @@ export async function generateTodos(
       likedKeywords: eligibility.likedKeywords,
       duration,
       sessionKey,
+      goal,
     });
 
     const { data: updated, error: uErr } = await db()

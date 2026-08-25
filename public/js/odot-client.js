@@ -290,11 +290,23 @@ export const odot = {
 
   getCardSummary: (cardId) => request(`/api/cards/${cardId}/summary`),
 
+  /* ── 할 일 후보군 ───────────────────────────────────────── */
+
+  /** 관심 키워드 + 설문 답변으로 목표 후보를 받는다. */
+  createGoals: (projectId, answers, count) =>
+    request(`/api/projects/${projectId}/goals`, {
+      method: "POST",
+      body: count ? { answers, count } : { answers },
+    }),
+
   /* ── 할 일 ──────────────────────────────────────────────── */
 
   /** 관심 키워드를 조합해 할 일 생성. 다시 부르면 재생성. 몇 초 걸린다. */
-  createTodos: (projectId, duration) =>
-    request(`/api/projects/${projectId}/todos`, { method: "POST", body: { duration } }),
+  createTodos: (projectId, duration, goal) =>
+    request(`/api/projects/${projectId}/todos`, {
+      method: "POST",
+      body: goal ? { duration, goal } : { duration },
+    }),
 
   updateTodo: (todoId, patch) => request(`/api/todos/${todoId}`, { method: "PATCH", body: patch }),
 

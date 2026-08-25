@@ -123,6 +123,8 @@ function installAuth() {
     void submitAuth();
   };
 
+  installOnboardingReturn();
+
   // 온보딩을 벗어나는 모든 경로에서, 로그인 전이면 로그인 화면으로 보낸다.
   const base = window.showScreen;
   window.showScreen = (id) => {
@@ -131,6 +133,7 @@ function installAuth() {
       return;
     }
     base(id);
+    applyScreenFit(id);
   };
 }
 
@@ -171,6 +174,38 @@ function injectAuthExtras(form) {
   if (password && password.value === "odot1234") password.value = "";
 
   setAuthMode("login");
+}
+
+/**
+ * 프로토타입의 온보딩은 마지막에 무조건 로그인 화면으로 보낸다.
+ * 이미 로그인한 사람이 '소개 다시 보기' 를 하면 로그인 화면이 떠서
+ * 로그아웃된 것처럼 보였다. 로그인 상태면 앱으로 돌려보낸다.
+ */
+function installOnboardingReturn() {
+  const backToApp = () => {
+    if (!bridge.ready) return false;
+    window.showScreen(state.interests.length ? "explore" : "interests");
+    return true;
+  };
+
+  const next = el("#onboardNext");
+  if (next) {
+    const original = next.onclick;
+    next.onclick = (event) => {
+      // 마지막 슬라이드에서만 가로챈다. 중간 슬라이드는 그대로 넘긴다.
+      if (state.slide >= 2 && backToApp()) return;
+      original?.call(next, event);
+    };
+  }
+
+  const skip = el("#onboardSkip");
+  if (skip) {
+    const original = skip.onclick;
+    skip.onclick = (event) => {
+      if (backToApp()) return;
+      original?.call(skip, event);
+    };
+  }
 }
 
 function setAuthMode(mode) {
@@ -366,6 +401,13 @@ function installSingleSelectInterests() {
       const node = el(sel);
       if (node) node.hidden = !wantsCustom;
     }
+    // 프로토타입은 입력칸을 disabled 로 두고 자기 로직으로 풀어 준다.
+    // 그 로직을 우리가 대체했으므로 여기서 직접 풀어야 한다.
+    const customInput = el("#customInterest");
+    if (customInput) {
+      customInput.disabled = !wantsCustom;
+      if (!wantsCustom) customInput.value = "";
+    }
     if (wantsCustom && !isCustom) {
       el("#customHelp").textContent = "어떤 관심사인지 적어 주세요. 최대 20자예요.";
     }
@@ -539,6 +581,258 @@ function installRealApi() {
   });
 }
 
+/* ── 화면 정리 (스크롤 없는 진행 · 스와이프 전용) ──────────────────── */
+
+/**
+ * 요청받은 화면 조정을 한곳에 모았다. 프로토타입 마크업은 건드리지 않고
+ * 스타일과 표시 여부로만 처리해서, 친구가 새 파일을 보내도 그대로 얹힌다.
+ *
+ *   · 발견 화면의 안내 문구(오늘의 발견 / 뭘 해볼까 / 스와이프 힌트 / 밍밍이 줄) 제거
+ *   · 카드 아래 x · i · 하트 버튼 제거 → 스와이프로만 진행
+ *   · '내 답 찾기' 를 오른쪽 위 화살표로 옮기고, 관심 카드 5개를 넘을 때만 노출
+ *   · 프로필 · 인사이트를 뺀 화면은 스크롤 없이 한 화면에 들어오게
+ */
+
+/** 스크롤을 허용할 화면 (내용이 길 수밖에 없는 곳) */
+const SCROLLABLE_SCREENS = ["profile", "review"];
+
+/** 이 개수를 넘으면 '내 답 찾기' 가 나타난다 */
+const DECISION_MIN_LIKES = 5;
+
+function installScreenTweaks() {
+  injectScreenStyles();
+  installDecisionEntry();
+
+  // 카드가 다시 그려질 때마다 노출 조건을 다시 판단한다.
+  const base = window.renderDeck;
+  window.renderDeck = () => {
+    base();
+    updateDecisionEntry();
+  };
+}
+
+function injectScreenStyles() {
+  if (document.getElementById("odotScreenStyles")) return;
+  const style = document.createElement("style");
+  style.id = "odotScreenStyles";
+  style.textContent = `
+    /* 발견 화면: 안내 문구와 반응 버튼을 걷어내고 카드만 남긴다 */
+    #explore .explore-header,
+    #explore > .sub,
+    #explore .swipe-hint,
+    #explore .mingming-line,
+    #explore .reaction-row{display:none !important}
+
+    /* 카드가 차지할 공간이 늘었으니 덱을 위로 끌어올린다 */
+    #explore .deck{margin-top:8px}
+
+    /* '내 답 찾기' → 오른쪽 위 화살표 */
+    #explore .topbar{position:relative}
+    #decisionStart.odot-arrow{
+      position:absolute;right:0;top:50%;transform:translateY(-50%);
+      width:40px;height:40px;padding:0;border:0;border-radius:50%;
+      background:var(--primary);color:#fff;font-size:0;line-height:0;
+      box-shadow:0 8px 18px #6e34cc38;cursor:pointer}
+    #decisionStart.odot-arrow:after{
+      content:"→";font-size:19px;line-height:40px;font-weight:800;display:block}
+    #decisionStart.odot-arrow[hidden]{display:none}
+
+    /* 스크롤 없이 한 화면에 담기 (프로필 · 인사이트 제외) */
+    .screen.odot-fit{
+      height:100dvh;overflow:hidden;
+      display:flex;flex-direction:column;
+      padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+    .screen.odot-fit .deck{flex:1;min-height:0}
+    .screen.odot-fit .calendar-grid{flex:none}
+    .screen.odot-scroll{height:auto;overflow-y:auto}
+
+    /* 관심사 화면: 여백을 줄여 한 화면에 담는다 */
+    #interests.odot-fit h1{font-size:26px;letter-spacing:-1.2px;margin:2px 0 6px}
+    #interests.odot-fit > .sub{margin:0 0 10px;font-size:13px}
+    #interests.odot-fit .chips{gap:8px;margin:14px 0 10px}
+    #interests.odot-fit .chip{min-height:64px}
+    #interests.odot-fit .custom-wrap{margin:4px 0 12px}
+    #interests.odot-fit .topbar{margin-bottom:10px}
+
+    /* 아카이브: 달력은 고정하고 아래 목록만 안쪽에서 스크롤한다 */
+    #calendar.odot-fit #calendarContent{flex:1;min-height:0;overflow-y:auto;
+      -webkit-overflow-scrolling:touch}
+    #calendar.odot-fit h1{font-size:26px;letter-spacing:-1.2px;margin:2px 0 6px}
+    #calendar.odot-fit > .sub{margin:0 0 8px;font-size:13px}
+    #calendar.odot-fit .topbar{margin-bottom:10px}
+
+    /* 로그인 · 온보딩: 회원가입 칸이 늘어난 만큼 여백을 줄인다 */
+    #login.odot-fit,#onboarding.odot-fit{padding-bottom:24px}
+    #login.odot-fit .auth-visual{transform:scale(.72);margin:-18px 0}
+    #login.odot-fit h1{font-size:26px;letter-spacing:-1.2px;margin:2px 0 6px}
+    #login.odot-fit > .auth-card > .sub,
+    #login.odot-fit .auth-card .sub{margin:0 0 10px;font-size:13px}
+    #login.odot-fit .login-form label{margin-top:8px}
+    #login.odot-fit .login-form input{padding:11px 13px}
+    #login.odot-fit .demo-account{margin:6px 0}
+    #login.odot-fit .text-action{margin-top:8px}
+
+    #onboarding.odot-fit .intro-scene{height:min(38dvh,260px);margin:14px 0}
+    #onboarding.odot-fit h1{font-size:26px;letter-spacing:-1.2px}
+    #onboarding.odot-fit .onboard{padding-top:14px}
+
+    /* 그래도 넘치면 잘리는 것보다 스크롤이 낫다 */
+    #login.odot-fit,#onboarding.odot-fit{overflow-y:auto}
+  `;
+  document.head.append(style);
+}
+
+/** 화면마다 스크롤 허용 여부를 붙인다. */
+function applyScreenFit(id) {
+  document.querySelectorAll(".screen").forEach((node) => {
+    const scrollable = SCROLLABLE_SCREENS.includes(node.id);
+    node.classList.toggle("odot-fit", !scrollable);
+    node.classList.toggle("odot-scroll", scrollable);
+  });
+}
+
+/* ── '내 답 찾기' 진입점 ───────────────────────────────────────────── */
+
+function installDecisionEntry() {
+  const button = el("#decisionStart");
+  const topbar = el("#explore .topbar");
+  if (!button || !topbar) return;
+
+  // 카드 아래에 있던 버튼을 상단 바 오른쪽으로 옮긴다.
+  button.classList.add("odot-arrow");
+  button.setAttribute("aria-label", "관심 카드로 내 답 찾기");
+  button.title = "내 답 찾기";
+  topbar.append(button);
+
+  updateDecisionEntry();
+}
+
+/** 관심 카드가 기준을 넘을 때만 화살표를 보여준다. */
+function updateDecisionEntry() {
+  const button = el("#decisionStart");
+  if (!button) return;
+  // 결정 플로우가 열려 있을 때는 프로토타입 쪽이 감춘 상태를 유지한다.
+  if (el("#explore")?.classList.contains("decision-mode")) return;
+
+  const likes = Storage.read().reactions.filter((x) => x.type === "like").length;
+  button.hidden = likes < DECISION_MIN_LIKES;
+}
+
+/* ── 결정 플로우 → 실제 할 일 후보군 ──────────────────────────────── */
+
+/**
+ * 프로토타입의 목표 후보는 카테고리별 하드코딩 목록이다.
+ * 설문 답변과 이 프로젝트에서 모은 관심 키워드를 서버로 보내
+ * 진짜 후보군을 받아 그 자리에 채운다.
+ *
+ * 프로토타입이 만든 구조와 클릭 핸들러는 그대로 두고 글자만 바꾼다 —
+ * 그래야 '고르기 → 확정' 흐름이 원래대로 동작한다.
+ */
+function installDecisionGoals() {
+  const base = window.renderDecisionGoals;
+  if (typeof base !== "function") return;
+
+  window.renderDecisionGoals = () => {
+    base();
+    void fillRealGoals();
+  };
+
+  // 고른 목표가 실제 할 일 생성에 반영되도록 확정 버튼을 잡는다.
+  const confirmBase = window.openDecisionProject;
+  if (typeof confirmBase === "function") {
+    window.openDecisionProject = () => {
+      confirmBase();
+      void createTodosFromGoal();
+    };
+  }
+}
+
+/** 설문 질문/답변을 서버가 읽을 수 있는 모양으로 모은다. */
+function collectAnswers() {
+  if (typeof decisionQuestions === "undefined") return [];
+  const lead = state.decisionLikes?.[0];
+  return decisionQuestions
+    .map((build, i) => {
+      const [question, options] = build(lead);
+      const picked = state.decisionAnswers?.[i];
+      return picked === undefined ? null : { question, answer: options[picked] };
+    })
+    .filter(Boolean);
+}
+
+async function fillRealGoals() {
+  if (!bridge.ready || !bridge.projectId) return;
+
+  const answers = collectAnswers();
+  if (answers.length === 0) return;
+
+  const sub = document.querySelector("#decisionFlow .flow-card .sub");
+  const original = sub?.textContent;
+  if (sub) sub.textContent = "관심 카드와 답변을 엮는 중이에요…";
+
+  try {
+    // 프로토타입은 후보 칸을 카테고리별로 여러 개 그린다. 그 수만큼 받아 온다.
+    const slots = document.querySelectorAll("#decisionGoals .goal-choice").length || 3;
+    const { goals } = await odot.createGoals(bridge.projectId, answers, Math.min(slots, 5));
+    if (!goals?.length) return;
+
+    bridge.goals = goals;
+    const nodes = [...document.querySelectorAll("#decisionGoals .goal-choice")];
+    nodes.forEach((node, i) => {
+      const goal = goals[i];
+      if (!goal) {
+        // 남는 칸에는 하드코딩된 목 목표가 들어 있다. 실제 후보만 남긴다.
+        node.style.display = "none";
+        return;
+      }
+      node.style.display = "";
+      const strong = node.querySelector("strong");
+      const small = node.querySelector("small");
+      if (strong) strong.textContent = goal.title;
+      if (small) small.textContent = `${goal.horizon} · ${goal.why}`;
+    });
+
+    hideEmptyGoalGroups();
+    if (sub) sub.textContent = "관심 카드와 답변에서 뽑은 후보예요.";
+  } catch (err) {
+    if (sub) sub.textContent = original ?? "";
+    toastSafe(messageOf(err));
+  }
+}
+
+/** 후보가 하나도 안 남은 카테고리 묶음은 제목만 떠 있게 되므로 함께 감춘다. */
+function hideEmptyGoalGroups() {
+  document.querySelectorAll("#decisionGoals > *").forEach((group) => {
+    if (group.classList.contains("goal-choice")) return;
+    const visible = [...group.querySelectorAll(".goal-choice")].some(
+      (n) => n.style.display !== "none",
+    );
+    if (group.querySelector(".goal-choice") && !visible) group.style.display = "none";
+  });
+}
+
+/** 고른 목표로 실제 할 일 목록을 만든다. */
+async function createTodosFromGoal() {
+  if (!bridge.ready || !bridge.projectId) return;
+
+  const index = state.decisionGoal;
+  const goal = bridge.goals?.[index];
+  if (!goal) return;
+
+  toastSafe("고른 목표로 할 일을 만드는 중이에요…");
+  try {
+    const { project } = await odot.createTodos(bridge.projectId, goal.suggestedDuration, {
+      title: goal.title,
+      why: goal.why,
+    });
+    bridge.lastProject = project;
+    toastSafe(`'${project.title}' 할 일 ${project.todos.length}개를 만들었어요.`);
+    window.showScreen("projects");
+  } catch (err) {
+    toastSafe(messageOf(err));
+  }
+}
+
 /* ── 프로젝트 목록 (친구의 #projects 화면을 실제 데이터에 연결) ────────── */
 
 /**
@@ -605,23 +899,29 @@ async function renderRealProjects() {
     return; // 실패하면 프로토타입 화면을 그대로 둔다.
   }
 
-  // 프로젝트가 하나뿐이면 전환할 것이 없다 — 화면을 건드리지 않는다.
-  if (projects.length < 2) {
+  if (projects.length === 0) {
     el("#odotProjectSwitch")?.remove();
+    ready.querySelector(".project-empty-state")?.removeAttribute("hidden");
     return;
   }
 
-  // 프로토타입이 #projectReady 안에 만들어 둔 것(아카이브·진행률·플랜 등)은
-  // 절대 건드리지 않는다. 세션 전환 목록만 뒤에 덧붙인다.
+  // 실제 프로젝트가 있는데 "아직 시작한 프로젝트가 없어요" 빈 상태가 위에 남아 있으면
+  // 목록이 화면 밖으로 밀려 전환이 안 되는 것처럼 보인다. 빈 상태만 감춘다.
+  // 프로토타입이 만든 나머지(아카이브·진행률·플랜)는 그대로 둔다.
+  ready.querySelector(".project-empty-state")?.setAttribute("hidden", "");
+  const title = el("#projects > h1");
+  if (title) title.innerHTML = "어떤 걸<br>이어서 해볼까요?";
+
+  // 목록은 맨 위에 둔다.
   let block = el("#odotProjectSwitch");
   if (!block) {
     block = document.createElement("section");
     block.id = "odotProjectSwitch";
-    ready.append(block);
+    ready.prepend(block);
   }
 
   block.innerHTML =
-    '<p class="eyebrow" style="margin-top:22px">다른 프로젝트로 옮기기</p>' +
+    '<p class="eyebrow">이어서 하기</p>' +
     '<div class="odot-project-list">' +
     projects
       .map((p) => {
@@ -641,11 +941,14 @@ async function renderRealProjects() {
         </button>`;
       })
       .join("") +
-    "</div>";
+    "</div>" +
+    '<button class="odot-project-new" id="odotNewProject" type="button">+ 새 프로젝트 시작하기</button>';
 
   block.querySelectorAll("[data-project]").forEach((node) => {
     node.onclick = () => void openSession(node.dataset.project);
   });
+  const add = el("#odotNewProject");
+  if (add) add.onclick = () => startNewProject();
 }
 
 /** 관심사 선택 화면이 곧 '새 프로젝트' 화면이다. */
@@ -1012,6 +1315,8 @@ async function boot() {
   installShare();
   installReviewCopyFix();
   installProjectList();
+  installScreenTweaks();
+  installDecisionGoals();
 
   try {
     if (!odot.isLoggedIn()) {

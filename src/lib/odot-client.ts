@@ -29,6 +29,7 @@ import type {
   CalendarMonth,
   CardDeck,
   CardSummary,
+  GoalCandidates,
   MeResponse,
   MonthlyReport,
   Project,
@@ -280,6 +281,22 @@ export const odot = {
   getCardSummary: (cardId: string) =>
     request<{ summary: CardSummary }>(`/api/cards/${cardId}/summary`),
 
+  /* ── 할 일 후보군 ───────────────────────────────────────── */
+
+  /**
+   * 관심 키워드 + 설문 답변으로 목표 후보를 받는다.
+   * 사용자가 하나 고르면 createTodos 로 실제 할 일을 만든다.
+   */
+  createGoals: (
+    projectId: string,
+    answers: Array<{ question: string; answer: string }>,
+    count?: number,
+  ) =>
+    request<GoalCandidates>(`/api/projects/${projectId}/goals`, {
+      method: "POST",
+      body: json(count ? { answers, count } : { answers }),
+    }),
+
   /* ── 할 일 ──────────────────────────────────────────────── */
 
   /**
@@ -287,10 +304,14 @@ export const odot = {
    * 다시 부르면 재생성된다 (실패 시 "다시 만들기"도 같은 호출).
    * 응답까지 몇 초 걸린다.
    */
-  createTodos: (projectId: string, duration: ProjectDuration) =>
+  createTodos: (
+    projectId: string,
+    duration: ProjectDuration,
+    goal?: { title: string; why?: string },
+  ) =>
     request<{ project: Project }>(`/api/projects/${projectId}/todos`, {
       method: "POST",
-      body: json({ duration }),
+      body: json(goal ? { duration, goal } : { duration }),
     }),
 
   updateTodo: (

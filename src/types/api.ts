@@ -249,6 +249,28 @@ export interface ProjectSummary {
   todoCount: number;
 }
 
+/* ─── 할 일 후보군 (관심 카드 + 설문) ─────────────────────────────── */
+
+/**
+ * 카드만으로는 '무엇에 끌리는지'만 알 수 있다.
+ * 설문 답변을 더해야 쓸 수 있는 시간·원하는 결과물까지 반영된 목표가 나온다.
+ */
+export interface GoalCandidate {
+  title: string;
+  horizon: "단기" | "중기" | "장기";
+  /** 왜 이 사람에게 맞는지 (설문 답변을 근거로) */
+  why: string;
+  /** 시작하는 행동 미리보기 */
+  firstSteps: string[];
+  suggestedDuration: ProjectDuration;
+}
+
+export interface GoalCandidates {
+  projectId: string;
+  goals: GoalCandidate[];
+  likedKeywords: string[];
+}
+
 /* ─── 완료 캘린더 (F-IYXFDA) ────────────────────────────────────────── */
 
 export interface CalendarDay {
@@ -318,6 +340,7 @@ export type EventType =
   | "signup"
   | "login"
   | "project_created"
+  | "goals_generated"
   | "card_impression"
   | "card_prefetch"
   | "card_reaction"

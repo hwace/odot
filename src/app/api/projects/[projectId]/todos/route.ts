@@ -10,6 +10,13 @@ type Ctx = { params: Promise<{ projectId: string }> };
 
 const BodySchema = z.object({
   duration: z.enum(["1d", "1w", "1m", "3m", "6m"]),
+  /** 후보군에서 고른 목표. 주면 그 목표에 맞춰 할 일을 만든다. */
+  goal: z
+    .object({
+      title: z.string().trim().min(1).max(60),
+      why: z.string().trim().max(120).optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -24,12 +31,12 @@ const BodySchema = z.object({
 export const POST = withRoute(async (req, ctx: Ctx) => {
   const user = await requireUser(req);
   const { projectId } = await ctx.params;
-  const { duration } = BodySchema.parse(await readJson(req));
+  const { duration, goal } = BodySchema.parse(await readJson(req));
 
   const { project, sessionKey } = await loadOwnedProject(user, projectId);
 
   try {
-    const result = await generateTodos(user, project, sessionKey, duration);
+    const result = await generateTodos(user, project, sessionKey, duration, goal);
     void logEvent(user.id, "project_generated", {
       projectId,
       duration,
