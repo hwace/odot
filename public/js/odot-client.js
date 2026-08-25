@@ -267,6 +267,10 @@ export const odot = {
   /** 기존 세션 열기 */
   getProject: (projectId) => request(`/api/projects/${projectId}`),
 
+  /** 프로젝트 이름 바꾸기 */
+  renameProject: (projectId, title) =>
+    request(`/api/projects/${projectId}`, { method: "PATCH", body: { title } }),
+
   getEligibility: (projectId) => request(`/api/projects/${projectId}/eligibility`),
 
   /* ── 카드 ───────────────────────────────────────────────── */

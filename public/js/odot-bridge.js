@@ -643,14 +643,18 @@ function injectScreenStyles() {
     /* 목표 찾기 단계는 내용이 길다. 화면이 overflow:hidden 이라 그냥 두면
        '프로젝트 만들기' 버튼이 화면 밖으로 잘린다. 안쪽에서 스크롤하고
        버튼은 아래에 붙여 둔다. */
+    /* 목록만 안쪽에서 스크롤하고, 버튼은 스크롤 영역 바깥에 둔다.
+       sticky 로 붙이면 컨테이너가 넘치지 않는 경우 따라오지 않는다. */
     #explore.decision-mode #decisionFlow{
+      flex:1;min-height:0;overflow:hidden;
+      display:flex;flex-direction:column}
+    #explore.decision-mode #decisionGoals{
       flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
-      display:flex;flex-direction:column;padding-bottom:4px}
-    #explore.decision-mode #decisionGoals{flex:1;min-height:0}
-    #explore.decision-mode #decisionConfirm{
-      position:sticky;bottom:0;z-index:2;margin-top:10px}
-    #explore.decision-mode #decisionHelper{
-      position:sticky;bottom:0;z-index:2;background:var(--paper);margin:0;padding:6px 0 2px}
+      padding-bottom:4px}
+    #explore.decision-mode #decisionConfirm{flex:none;margin-top:10px}
+    #explore.decision-mode #decisionHelper{flex:none;margin:6px 0 0}
+    /* 질문 단계도 길어지면 안쪽에서 스크롤 */
+    #explore.decision-mode #decisionFlow > .flow-card{flex:0 1 auto;min-height:0;overflow-y:auto}
 
     /* 스크롤 없이 한 화면에 담기 (프로필 · 인사이트 제외)
        — 반드시 .active 까지 붙인다. 안 그러면 .screen{display:none} 을
@@ -694,6 +698,11 @@ function injectScreenStyles() {
     .odot-swipe-hint.ready i{display:inline-block;margin-right:4px;font-style:normal;
       animation:odot-nudge 1.4s ease-in-out infinite}
     @keyframes odot-nudge{0%,100%{transform:translateY(0)}50%{transform:translateY(3px)}}
+
+    /* 프로젝트 화면: 화면 자체는 고정하고 내용만 안쪽에서 스크롤한다 */
+    #projects.odot-fit #projectReady{
+      flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+    #odotDetail{min-height:0}
 
     /* 아카이브 상단 설명 문구는 걷어낸다 */
     #calendar > .eyebrow,#calendar > h1{display:none}
@@ -932,6 +941,18 @@ function installDecisionEntry() {
   const button = el("#decisionStart");
   if (button) button.style.display = "none";
   installSwipeDown();
+
+  // 목표 찾기로 들어가고 나올 때마다 안내 문구를 다시 판단한다.
+  // renderDeck 만으로는 모드 전환 시점을 놓친다.
+  if (typeof setDecisionMode === "function" && !setDecisionMode.odotWrapped) {
+    const base = setDecisionMode;
+    const wrapped = (on) => {
+      base(on);
+      updateSwipeHint();
+    };
+    wrapped.odotWrapped = true;
+    window.setDecisionMode = wrapped;
+  }
 }
 
 /** 카드가 다시 그려질 때마다 스와이프 감지를 새 카드에 붙이고 안내를 갱신한다. */
@@ -1063,6 +1084,17 @@ async function fillRealGoals() {
     hideEmptyGoalGroups();
     stripGoalCopy();
   } catch (err) {
+    // 실패하면 하드코딩 후보가 그대로 남아 진짜처럼 보인다.
+    // 그러느니 비우고 다시 시도할 수 있게 알린다.
+    const root = el("#decisionGoals");
+    if (root) {
+      root.innerHTML =
+        '<div class="empty"><strong>후보를 만들지 못했어요.</strong>' +
+        "<p>잠시 후 다시 시도해 주세요.</p>" +
+        '<button class="secondary" id="odotRetryGoals" type="button">다시 시도</button></div>';
+      const retry = el("#odotRetryGoals");
+      if (retry) retry.onclick = () => void fillRealGoals();
+    }
     if (sub) sub.textContent = original ?? "";
     toastSafe(messageOf(err));
   }
@@ -1172,6 +1204,10 @@ function injectProjectListStyles() {
     .odot-project .now{flex:none;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;
       background:var(--primary);color:#fff}
     .odot-project.current{border-color:var(--primary);box-shadow:0 6px 18px #6e34cc1f}
+    .odot-project-open{display:flex;gap:12px;align-items:center;flex:1;min-width:0;
+      padding:0;border:0;background:transparent;text-align:left;cursor:pointer}
+    .odot-project-rename{flex:none;width:30px;height:30px;padding:0;border:1px solid var(--line);
+      border-radius:50%;background:#fff;color:var(--muted);font-size:13px;cursor:pointer}
     .odot-project-new{width:100%;margin-top:6px;padding:14px;border:1px dashed #d8cec0;
       border-radius:20px;background:#fff;color:var(--primary);font-size:14px;font-weight:800}
   `;
@@ -1237,12 +1273,16 @@ async function renderRealProjects() {
           STATUS_LABEL[p.status] ?? p.status,
         ].join(" · ");
         const current = p.id === bridge.projectId;
-        return `<button class="odot-project ${current ? "current" : ""}" data-project="${p.id}"
-          style="--sc:var(--${t.color})" type="button">
-          <img src="${t.asset}" alt="">
-          <span class="body"><span class="name">${escapeHtml(name)}</span><span class="meta">${meta}</span></span>
+        return `<div class="odot-project ${current ? "current" : ""}"
+          style="--sc:var(--${t.color})">
+          <button class="odot-project-open" data-project="${p.id}" type="button">
+            <img src="${t.asset}" alt="">
+            <span class="body"><span class="name">${escapeHtml(name)}</span><span class="meta">${meta}</span></span>
+          </button>
           ${current ? '<span class="now">보는 중</span>' : ""}
-        </button>`;
+          <button class="odot-project-rename" data-rename="${p.id}" type="button"
+            aria-label="이름 바꾸기" title="이름 바꾸기">✎</button>
+        </div>`;
       })
       .join("") +
     "</div>" +
@@ -1251,8 +1291,44 @@ async function renderRealProjects() {
   block.querySelectorAll("[data-project]").forEach((node) => {
     node.onclick = () => void openProject(node.dataset.project);
   });
+  block.querySelectorAll("[data-rename]").forEach((node) => {
+    node.onclick = (event) => {
+      event.stopPropagation();
+      void renameProject(node.dataset.rename);
+    };
+  });
   const add = el("#odotNewProject");
   if (add) add.onclick = () => startNewProject();
+}
+
+/**
+ * 프로젝트 이름을 바꾼다.
+ * 같은 관심사로 여러 개를 만들면 목록에서 구분이 안 되므로 이름이 필요하다.
+ */
+async function renameProject(projectId) {
+  if (!projectId) return;
+  let current = "";
+  try {
+    const { project } = await odot.getProject(projectId);
+    current = project.title ?? "";
+  } catch {
+    /* 못 읽어도 새 이름은 받을 수 있다 */
+  }
+
+  const title = window.prompt("프로젝트 이름을 지어 주세요.", current);
+  if (title === null) return;
+  if (!title.trim()) {
+    toastSafe("이름을 한 글자 이상 적어 주세요.");
+    return;
+  }
+
+  try {
+    await odot.renameProject(projectId, title.trim());
+    toastSafe("이름을 바꿨어요.");
+    window.renderProjects();
+  } catch (err) {
+    toastSafe(messageOf(err));
+  }
 }
 
 /** 관심사 선택 화면이 곧 '새 프로젝트' 화면이다. */
@@ -1421,6 +1497,8 @@ async function renderProjectDetail() {
         <strong>${escapeHtml(project.title ?? `${project.customTopic ?? topic.name} 탐색`)}</strong>
         <span>${done} / ${project.todos.length} 완료</span>
       </span>
+      <button class="odot-project-rename" id="odotDetailRename" type="button"
+        aria-label="이름 바꾸기" title="이름 바꾸기">✎</button>
     </div>
     <div class="odot-todos" id="odotTodoList">${todoListHtml(project.todos)}</div>
     <div class="odot-detail-actions">
@@ -1438,6 +1516,7 @@ async function renderProjectDetail() {
     panel.style.display = "none";
     window.renderProjects();
   };
+  el("#odotDetailRename").onclick = () => void renameProject(projectId);
   el("#odotAddAi").onclick = () => void addTodosWithAi(projectId);
   el("#odotAddManual").onclick = () => {
     const form = el("#odotAddForm");

@@ -251,6 +251,13 @@ export const odot = {
       `/api/projects/${projectId}`,
     ),
 
+  /** 프로젝트 이름 바꾸기 (같은 카테고리끼리 구분용) */
+  renameProject: (projectId: string, title: string) =>
+    request<{ project: Project }>(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: json({ title }),
+    }),
+
   getEligibility: (projectId: string) =>
     request<ProjectEligibility>(`/api/projects/${projectId}/eligibility`),
 
