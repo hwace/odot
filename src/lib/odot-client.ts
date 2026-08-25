@@ -23,6 +23,8 @@
 import type {
   ApiErrorCode,
   ApiResponse,
+  AuthResult,
+  Session,
   CalendarDayDetail,
   CalendarMonth,
   CardDeck,
@@ -44,6 +46,7 @@ import type {
 } from "@/types/api";
 
 const STORAGE_KEY = "odot.deviceId";
+const SESSION_KEY = "odot.session";
 
 /** 백엔드가 다른 오리진에 있으면 NEXT_PUBLIC_API_BASE_URL 로 지정한다. */
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -75,23 +78,81 @@ export function clearDeviceId(): void {
   window.localStorage.removeItem(STORAGE_KEY);
 }
 
+/* ── 세션 저장소 ────────────────────────────────────────────────────── */
+
+export function getSession(): Session | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as Session) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setSession(session: Session): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+export function clearSession(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(SESSION_KEY);
+}
+
+export function isLoggedIn(): boolean {
+  return getSession() !== null;
+}
+
+/** 만료된 액세스 토큰을 리프레시 토큰으로 갱신한다. 실패하면 세션을 버린다. */
+async function renewSession(): Promise<Session | null> {
+  const current = getSession();
+  if (!current?.refreshToken) return null;
+  try {
+    const res = await fetch(`${BASE}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: current.refreshToken }),
+    });
+    const body = (await res.json()) as ApiResponse<{ session: Session }>;
+    if (!body.ok) {
+      clearSession();
+      return null;
+    }
+    setSession(body.data.session);
+    return body.data.session;
+  } catch {
+    return null;
+  }
+}
+
 async function request<T>(
   path: string,
-  init: RequestInit & { auth?: boolean } = {},
+  init: RequestInit & { auth?: boolean; retried?: boolean } = {},
 ): Promise<T> {
-  const { auth = true, headers, ...rest } = init;
+  const { auth = true, retried = false, headers, ...rest } = init;
   const merged = new Headers(headers);
   merged.set("Content-Type", "application/json");
 
   if (auth) {
-    const deviceId = getDeviceId();
-    if (deviceId) merged.set("x-device-id", deviceId);
+    const session = getSession();
+    if (session) merged.set("Authorization", `Bearer ${session.accessToken}`);
+    else {
+      // 로그인 전 과도기 경로. 로그인 화면이 붙으면 사라진다.
+      const deviceId = getDeviceId();
+      if (deviceId) merged.set("x-device-id", deviceId);
+    }
   }
 
   const res = await fetch(`${BASE}${path}`, { ...rest, headers: merged });
   const body = (await res.json()) as ApiResponse<T>;
 
   if (!body.ok) {
+    // 액세스 토큰이 만료된 것뿐이면 갱신해서 한 번만 다시 시도한다.
+    if (body.error.code === "UNAUTHENTICATED" && auth && !retried && getSession()) {
+      const renewed = await renewSession();
+      if (renewed) return request<T>(path, { ...init, retried: true });
+    }
     throw new OdotApiError(body.error.code, body.error.message, body.error.details, res.status);
   }
   return body.data;
@@ -100,16 +161,54 @@ async function request<T>(
 const json = (body: unknown) => JSON.stringify(body);
 
 export const odot = {
+  /* ── 계정 ───────────────────────────────────────────────── */
+
+  /** 회원가입. 성공하면 바로 로그인된 상태가 된다. */
+  async signUp(input: { email: string; password: string; age: number }): Promise<AuthResult> {
+    const data = await request<AuthResult>("/api/auth/signup", {
+      method: "POST",
+      auth: false,
+      body: json(input),
+    });
+    setSession(data.session);
+    clearDeviceId();
+    return data;
+  },
+
+  /** 로그인 */
+  async logIn(input: { email: string; password: string }): Promise<AuthResult> {
+    const data = await request<AuthResult>("/api/auth/login", {
+      method: "POST",
+      auth: false,
+      body: json(input),
+    });
+    setSession(data.session);
+    clearDeviceId();
+    return data;
+  },
+
+  /** 로그아웃. 저장된 토큰도 함께 지운다. */
+  async logOut(): Promise<void> {
+    try {
+      await request<{ loggedOut: true }>("/api/auth/logout", { method: "POST" });
+    } finally {
+      clearSession();
+    }
+  },
+
   /* ── 사용자 ─────────────────────────────────────────────── */
 
-  /** 첫 실행. 나이를 받아 익명 사용자를 만들고 deviceId 를 저장한다. */
+  /**
+   * @deprecated 로그인 화면이 붙기 전까지의 과도기 경로.
+   * 기기 단위라 같은 브라우저를 쓰면 같은 사용자가 된다.
+   */
   async createUser(input: { age: number }): Promise<{ user: User; isNew: boolean }> {
     const data = await request<{ user: User; isNew: boolean }>("/api/users/anonymous", {
       method: "POST",
       auth: false,
       body: json({ deviceId: getDeviceId() ?? undefined, age: input.age }),
     });
-    setDeviceId(data.user.deviceId);
+    if (data.user.deviceId) setDeviceId(data.user.deviceId);
     return data;
   },
 
@@ -213,10 +312,15 @@ export const odot = {
 
   /** 공유용 1080x1080 PNG 를 Blob 으로 받는다. */
   async getShareImage(month: string): Promise<Blob> {
-    const deviceId = getDeviceId();
-    const res = await fetch(`${BASE}/api/reports/monthly/${month}/image`, {
-      headers: deviceId ? { "x-device-id": deviceId } : {},
-    });
+    // 이미지 요청도 다른 API 와 같은 인증을 써야 한다.
+    const session = getSession();
+    const deviceId = session ? null : getDeviceId();
+    const headers: Record<string, string> = session
+      ? { Authorization: `Bearer ${session.accessToken}` }
+      : deviceId
+        ? { "x-device-id": deviceId }
+        : {};
+    const res = await fetch(`${BASE}/api/reports/monthly/${month}/image`, { headers });
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as ApiResponse<never> | null;
       throw new OdotApiError(

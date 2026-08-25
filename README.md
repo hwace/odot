@@ -2,6 +2,18 @@
 
 리버스 투두 추천 앱 `odot`의 백엔드입니다. PRD는 [`PRD.md`](PRD.md), API 명세는 [`docs/API.md`](docs/API.md).
 
+## 신원 — 이메일 계정
+
+회원가입·로그인은 **Supabase Auth** 에 맡깁니다. 비밀번호 해싱과 세션 발급을 직접 만들지 않기 위해서입니다.
+`public.users` 는 나이 같은 프로필만 들고 `auth_user_id` 로 `auth.users` 를 참조합니다.
+
+프론트는 `session.accessToken` 을 `Authorization: Bearer` 로 실어 보내면 되고,
+만료되면 클라이언트가 `refreshToken` 으로 알아서 갱신합니다.
+
+> **`x-device-id` 는 과도기 경로입니다.** 로그인 화면이 붙기 전까지만 남겨 둔 것으로,
+> 기기 단위라 **같은 브라우저를 쓰면 같은 사용자가 됩니다.**
+> 로그인이 준비되면 `REQUIRE_AUTH=true` 로 막고 그다음 배포에서 코드를 지우세요.
+
 ## 핵심 모델 — 프로젝트 = 세션
 
 **프로젝트 하나가 곧 하나의 세션입니다.** 클로드 대화창과 같습니다.
@@ -29,7 +41,7 @@ AI가 그 키워드들을 조합해 할 일 목록 생성
 - **Next.js 15 App Router** — API는 `src/app/api/**` 에만 있습니다
 - **Supabase (Postgres)** — 서버에서 service role 로만 접근, 모든 테이블 RLS 차단
 - **OpenAI** — 카드 키워드 / 쉬운 요약 / 할 일 생성 + 연령 검열
-- **익명 인증** — 기기 단위 `x-device-id` 헤더
+- **이메일 계정** — Supabase Auth (비밀번호 해싱·세션 발급을 직접 만들지 않음)
 
 ## 시작하기
 
@@ -43,6 +55,8 @@ npm install
 | --- | --- | --- |
 | `SUPABASE_URL` | ✅ | 이미 채워져 있음 |
 | `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Supabase 대시보드 → Project Settings → API Keys → `service_role` |
+| `SUPABASE_ANON_KEY` | ✅ | 비밀번호 로그인 전용. 공개돼도 되는 키 (이미 채워져 있음) |
+| `REQUIRE_AUTH` | | `true` 면 `x-device-id` 과도기 경로를 막는다. 로그인 화면이 붙으면 켜세요 |
 | `OPENAI_API_KEY` | ✅ | |
 | `OPENAI_MODEL` | | 기본 `gpt-5.6-luna`. 이 키가 접근 가능한 채팅 모델 |
 | `OPENAI_MODERATION_MODEL` | | 기본 `omni-moderation-latest`. 권한이 없으면 채팅 모델이 대신 검열 |
@@ -71,9 +85,10 @@ curl http://localhost:3000/api/health
 npm run smoke
 ```
 
-세션 생성 → 첫 덱 지연 측정 → 키워드 형태 검증 → 선생성 파이프라인 → 스와이프 →
+회원가입·로그인·토큰 갱신 → 세션 생성 → 첫 덱 지연 측정 → 키워드 형태 검증 →
+선생성 파이프라인 → 스와이프 →
 **세션 격리** → 할 일 생성 → 완료 캘린더 → 월간 정산 → 공유 이미지 → 연령 검열 →
-소유권 차단까지 69개 검사를 돌립니다. 실제 Supabase·OpenAI를 호출합니다.
+**계정 간 격리** 까지 79개 검사를 돌립니다. 실제 Supabase·OpenAI를 호출합니다.
 
 ## 트렌드 키워드에 대해
 
@@ -195,7 +210,8 @@ src/
 │  ├─ reports.ts      월간 정산 집계
 │  ├─ trends.ts       큐레이션 시드 키워드 풀 (카테고리별 10개씩)
 │  ├─ ai/             OpenAI 프롬프트 3종 (카드 키워드 · 요약 · 할 일)
-│  ├─ auth.ts         x-device-id → 사용자
+│  ├─ auth.ts         Bearer 토큰 → 사용자 (x-device-id 는 과도기)
+│  ├─ accounts.ts     가입·로그인·토큰 갱신 (Supabase Auth)
 │  ├─ http.ts         ApiResponse 규격 · 에러 변환
 │  └─ odot-client.ts  ← 프론트가 쓰는 클라이언트
 └─ types/api.ts       ← 프론트가 쓰는 타입

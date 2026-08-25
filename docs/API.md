@@ -18,8 +18,8 @@
 ```ts
 import { odot } from "@/lib/odot-client";
 
-// 1. 첫 실행 — 기기 등록 (나이 필수)
-await odot.createUser({ age: 17 });
+// 1. 회원가입 (또는 odot.logIn) — 토큰은 클라이언트가 알아서 저장/갱신한다
+await odot.signUp({ email: "me@example.com", password: "8자 이상", age: 17 });
 
 // 2. 새 세션 열기 — 첫 카드 덱이 함께 온다 (AI 대기 없음, 실측 ~0.4초)
 const { project, deck } = await odot.createProject({ topic: "study" });
@@ -64,13 +64,18 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 
 `error.message`는 **그대로 화면에 띄워도 되는 한국어**입니다. 분기는 `error.code`로 하세요.
 
-### 인증
+### 인증 — 이메일 계정
 
-로그인이 없습니다. 기기 단위 익명 사용자입니다.
+1. `POST /api/auth/signup` 또는 `POST /api/auth/login` 으로 `session` 을 받습니다.
+2. `session.accessToken` 을 **모든 요청에 `Authorization: Bearer <accessToken>` 헤더**로 실습니다.
+3. 액세스 토큰이 만료되면 `UNAUTHENTICATED` 가 오는데, `refreshToken` 으로 갱신하고 다시 보내면 됩니다.
+   (클라이언트가 자동으로 처리하므로 직접 할 일은 없습니다)
 
-1. 첫 실행 때 `POST /api/users/anonymous` 로 사용자를 만듭니다.
-2. 응답의 `user.deviceId`를 기기에 저장합니다. (클라이언트가 `localStorage["odot.deviceId"]`에 자동 저장)
-3. 이후 **모든 요청에 `x-device-id: <deviceId>` 헤더**를 실습니다.
+비밀번호는 우리 DB에 저장되지 않습니다 — Supabase Auth 가 해싱해서 보관하고, 우리는 세션 토큰만 다룹니다.
+
+> **`x-device-id` 는 과도기 경로입니다.** 로그인 화면이 붙기 전까지만 남겨 둔 것으로,
+> 기기 단위라 **같은 브라우저를 쓰면 같은 사용자가 됩니다.** 로그인이 준비되면
+> 서버 환경변수 `REQUIRE_AUTH=true` 로 막고 그다음 배포에서 코드를 지웁니다.
 
 ### 에러 코드
 
@@ -78,7 +83,9 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 | --- | --- | --- | --- |
 | `BAD_REQUEST` | 400 | 입력 형식 오류 | 폼 오류 표시 |
 | `UNAUTHENTICATED` | 401 | `x-device-id` 없음 | 시작 화면으로 |
-| `USER_NOT_FOUND` | 401 | 등록 안 된 기기 | deviceId 지우고 다시 생성 |
+| `USER_NOT_FOUND` | 401 | 계정 정보 없음 | 다시 로그인 |
+| `INVALID_CREDENTIALS` | 401 | 이메일/비밀번호 불일치 | "이메일 또는 비밀번호를 확인해주세요" |
+| `EMAIL_TAKEN` | 409 | 이미 가입된 이메일 | 로그인 화면으로 안내 |
 | `FORBIDDEN` | 403 | 남의 리소스 | 목록으로 |
 | `NOT_FOUND` | 404 | 없는 리소스 | — |
 | `ALREADY_REACTED` | 409 | 이미 넘긴 카드 | 무시하고 다음 카드로 |
@@ -94,25 +101,49 @@ const { project: done } = await odot.createTodos(project.id, "1w");
 
 ---
 
-## 2. 사용자
+## 2. 계정
 
-### `POST /api/users/anonymous` · 기기 등록
-
-인증 불필요. 여러 번 호출해도 안전합니다(같은 `deviceId`면 기존 사용자를 돌려줌).
+### `POST /api/auth/signup` · 회원가입
 
 ```jsonc
-// 요청
-{ "deviceId": "선택 · 기존 값이 있으면", "age": 17 }
-
+{ "email": "me@example.com", "password": "8자 이상", "age": 17 }
+```
+```jsonc
 // 응답 data
 {
-  "user": { "id": "…", "deviceId": "…", "age": 17, "ageGroup": "high", "isMinor": true, … },
+  "user": { "id": "…", "email": "me@example.com", "age": 17,
+            "ageGroup": "high", "isMinor": true, "deviceId": null, … },
+  "session": { "accessToken": "…", "refreshToken": "…", "expiresAt": "2026-08-25T15:00:00.000Z" },
   "isNew": true
 }
 ```
 
-`age`는 5~120 정수. **필수**입니다 — 연령별 콘텐츠 검열의 기준값입니다. (§9 참고)
-관심사는 여기서 받지 않습니다 — 프로젝트를 만들 때 프로젝트마다 고릅니다.
+- **가입과 동시에 로그인됩니다** — 바로 앱을 쓸 수 있습니다.
+- `password` 는 8자 이상. 우리 DB에 저장되지 않습니다.
+- `age` 는 5~120 정수. **필수**입니다 — 연령별 콘텐츠 검열의 기준값입니다 (§9).
+- 이미 가입된 이메일이면 `EMAIL_TAKEN`.
+- 관심사는 여기서 받지 않습니다 — 프로젝트를 만들 때 프로젝트마다 고릅니다.
+
+### `POST /api/auth/login`
+
+```jsonc
+{ "email": "me@example.com", "password": "…" }
+```
+
+응답은 회원가입과 같은 모양(`isNew: false`)입니다.
+
+> 이메일이 없든 비밀번호가 틀리든 **똑같이 `INVALID_CREDENTIALS`** 로 답합니다 —
+> 어느 이메일이 가입돼 있는지 알려주지 않기 위해서입니다. 화면 문구도 하나로 두세요.
+
+### `POST /api/auth/refresh`
+
+```jsonc
+{ "refreshToken": "…" }   →   { "session": { … } }
+```
+
+### `POST /api/auth/logout`
+
+`Authorization` 헤더만 있으면 됩니다. 프론트는 저장해 둔 토큰도 함께 지우세요.
 
 ### `GET /api/me` · 내 정보 + 모든 프로젝트 합산 통계
 ### `PATCH /api/me` · 나이 수정 `{ "age": 18 }`
@@ -416,7 +447,11 @@ if (result === "no_app") showInstagramInstallGuide();
 | 메서드 | 경로 | 기능 |
 | --- | --- | --- |
 | GET | `/api/health` | 배선/환경변수 확인 |
-| POST | `/api/users/anonymous` | 기기 등록 (나이 필수) |
+| POST | `/api/auth/signup` | 회원가입 (이메일·비밀번호·나이) |
+| POST | `/api/auth/login` | 로그인 |
+| POST | `/api/auth/refresh` | 액세스 토큰 갱신 |
+| POST | `/api/auth/logout` | 로그아웃 |
+| POST | `/api/users/anonymous` | *(과도기)* 기기 등록 |
 | GET / PATCH | `/api/me` | 내 정보 · 나이 수정 |
 | GET | `/api/topics` | 관심사 카드 7종 |
 | GET | `/api/projects` | 세션 목록 |

@@ -28,7 +28,9 @@ export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 export type ApiErrorCode =
   | "BAD_REQUEST"        // 400 · 입력값 형식 오류
   | "UNAUTHENTICATED"    // 401 · x-device-id 헤더 없음
-  | "USER_NOT_FOUND"     // 401 · 등록되지 않은 디바이스
+  | "USER_NOT_FOUND"     // 401 · 계정 정보를 찾을 수 없음
+  | "INVALID_CREDENTIALS"// 401 · 이메일 또는 비밀번호가 틀림
+  | "EMAIL_TAKEN"        // 409 · 이미 가입된 이메일
   | "FORBIDDEN"          // 403 · 남의 리소스 접근
   | "NOT_FOUND"          // 404
   | "ALREADY_REACTED"    // 409 · 이미 반응이 확정된 카드
@@ -44,12 +46,29 @@ export type AgeGroup = "child" | "middle" | "high" | "adult";
 
 export interface User {
   id: string;
-  deviceId: string;
+  /** 이메일 계정으로 가입한 경우. 익명 과도기 경로면 null */
+  email: string | null;
   age: number;
   ageGroup: AgeGroup;
   isMinor: boolean;
   createdAt: string;
   lastActiveAt: string;
+  /** @deprecated 익명 과도기 경로에서만 채워진다. 로그인이 붙으면 사라진다. */
+  deviceId: string | null;
+}
+
+/** 로그인 세션. accessToken 을 Authorization: Bearer 로 실어 보낸다. */
+export interface Session {
+  accessToken: string;
+  refreshToken: string;
+  /** 액세스 토큰 만료 시각 (ISO) */
+  expiresAt: string;
+}
+
+export interface AuthResult {
+  user: User;
+  session: Session;
+  isNew: boolean;
 }
 
 export interface MeResponse {
@@ -292,6 +311,8 @@ export interface ShareLog {
 /* ─── 이벤트 로그 ───────────────────────────────────────────────────── */
 
 export type EventType =
+  | "signup"
+  | "login"
   | "project_created"
   | "card_impression"
   | "card_prefetch"

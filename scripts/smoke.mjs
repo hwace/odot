@@ -10,13 +10,16 @@
 const BASE = process.env.BASE ?? "http://localhost:3000";
 const AGE = Number(process.env.SMOKE_AGE ?? 17);
 
+let accessToken = null;
 let deviceId = null;
 let passed = 0;
 const failures = [];
 
-async function call(method, path, body, { auth = true } = {}) {
+async function call(method, path, body, { auth = true, token } = {}) {
   const headers = { "Content-Type": "application/json" };
-  if (auth && deviceId) headers["x-device-id"] = deviceId;
+  const bearer = token ?? accessToken;
+  if (auth && bearer) headers.Authorization = `Bearer ${bearer}`;
+  else if (auth && deviceId) headers["x-device-id"] = deviceId;
 
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -70,27 +73,54 @@ async function main() {
     process.exit(1);
   }
 
-  step("1. 인증");
+  step("1. 계정");
   const noAuth = await call("GET", "/api/me", undefined, { auth: false });
-  check("헤더 없으면 401", noAuth.status === 401 && noAuth.error?.code === "UNAUTHENTICATED");
+  check("인증 없으면 401", noAuth.status === 401 && noAuth.error?.code === "UNAUTHENTICATED");
+  check(
+    "가짜 토큰 거부",
+    (await call("GET", "/api/me", undefined, { token: "not-a-real-token" })).status === 401,
+  );
 
-  const created = await call("POST", "/api/users/anonymous", { age: AGE }, { auth: false });
-  check("익명 사용자 생성", created.ok === true, created.error);
-  deviceId = created.data?.user?.deviceId;
-  check("deviceId 발급", Boolean(deviceId));
+  const stamp = Date.now();
+  const me = { email: `smoke${stamp}@odot.test`, password: "odot-smoke-1234", age: AGE };
+
+  const signed = await call("POST", "/api/auth/signup", me, { auth: false });
+  check("회원가입", signed.ok === true, signed.error);
+  accessToken = signed.data?.session?.accessToken;
+  check("세션 발급", Boolean(accessToken && signed.data?.session?.refreshToken));
+  check("이메일 저장", signed.data?.user?.email === me.email, signed.data?.user);
   check(
     "나이로 ageGroup 계산",
-    created.data?.user?.ageGroup ===
+    signed.data?.user?.ageGroup ===
       (AGE < 13 ? "child" : AGE < 16 ? "middle" : AGE < 19 ? "high" : "adult"),
-    created.data?.user,
+    signed.data?.user,
   );
-  check("isMinor 계산", created.data?.user?.isMinor === AGE < 19);
+  check("isMinor 계산", signed.data?.user?.isMinor === AGE < 19);
 
-  const again = await call("POST", "/api/users/anonymous", { deviceId, age: AGE }, { auth: false });
-  check("같은 deviceId 재호출 시 동일 사용자", again.data?.user?.id === created.data.user.id);
+  check(
+    "같은 이메일 재가입 차단",
+    (await call("POST", "/api/auth/signup", me, { auth: false })).error?.code === "EMAIL_TAKEN",
+  );
+  check(
+    "짧은 비밀번호 거부",
+    (await call("POST", "/api/auth/signup", { ...me, email: `w${stamp}@odot.test`, password: "1234" }, { auth: false })).status === 400,
+  );
+  check(
+    "틀린 비밀번호 거부",
+    (await call("POST", "/api/auth/login", { email: me.email, password: "wrong-password-9" }, { auth: false })).error?.code === "INVALID_CREDENTIALS",
+  );
+  check(
+    "없는 계정도 같은 코드로 (가입 여부 숨김)",
+    (await call("POST", "/api/auth/login", { email: `zz${stamp}@odot.test`, password: "whatever12" }, { auth: false })).error?.code === "INVALID_CREDENTIALS",
+  );
 
-  const badAge = await call("POST", "/api/users/anonymous", { age: 3 }, { auth: false });
-  check("나이 범위 밖이면 400", badAge.status === 400);
+  const relogin = await call("POST", "/api/auth/login", { email: me.email, password: me.password }, { auth: false });
+  check("로그인", relogin.ok === true && relogin.data.user.id === signed.data.user.id, relogin.error);
+
+  const refreshed = await call("POST", "/api/auth/refresh", { refreshToken: signed.data.session.refreshToken }, { auth: false });
+  check("토큰 갱신", Boolean(refreshed.data?.session?.accessToken), refreshed.error);
+  check("갱신한 토큰으로 조회", (await call("GET", "/api/me", undefined, { token: refreshed.data.session.accessToken })).ok === true);
+  check("잘못된 리프레시 토큰 거부", (await call("POST", "/api/auth/refresh", { refreshToken: "nope" }, { auth: false })).status === 401);
 
   step("2. 관심사 주제");
   const topics = await call("GET", "/api/topics", undefined, { auth: false });
@@ -256,7 +286,7 @@ async function main() {
   check("반응 없는 달은 isEmpty", (await call("GET", "/api/reports/monthly?month=2020-01")).data?.report?.isEmpty === true);
 
   const imgRes = await fetch(`${BASE}/api/reports/monthly/${month}/image`, {
-    headers: { "x-device-id": deviceId },
+    headers: { Authorization: `Bearer ${accessToken}` },
   });
   check("공유 이미지 200 PNG", imgRes.status === 200 && imgRes.headers.get("content-type")?.includes("image/png"));
   const bytes = (await imgRes.arrayBuffer()).byteLength;
@@ -272,16 +302,32 @@ async function main() {
     banned.error ?? "ok",
   );
 
-  step("12. 소유권");
-  const other = await call("POST", "/api/users/anonymous", { age: 20 }, { auth: false });
-  const mine = deviceId;
-  deviceId = other.data.user.deviceId;
-  check("남의 프로젝트 접근 차단", (await call("GET", `/api/projects/${p1.id}`)).error?.code === "FORBIDDEN");
-  check("남의 덱 접근 차단", (await call("GET", `/api/projects/${p1.id}/cards`)).error?.code === "FORBIDDEN");
-  check("남의 할 일 수정 차단", (await call("PATCH", `/api/todos/${project.todos[0].id}`, { isCompleted: false })).error?.code === "FORBIDDEN");
-  const otherList = await call("GET", "/api/projects");
+  step("12. 계정 간 격리");
+  const stamp2 = Date.now();
+  const other = { email: `other${stamp2}@odot.test`, password: "odot-other-1234", age: 20 };
+  const otherAuth = await call("POST", "/api/auth/signup", other, { auth: false });
+  const otherToken = otherAuth.data.session.accessToken;
+
+  check(
+    "남의 프로젝트 접근 차단",
+    (await call("GET", `/api/projects/${p1.id}`, undefined, { token: otherToken })).error?.code === "FORBIDDEN",
+  );
+  check(
+    "남의 덱 접근 차단",
+    (await call("GET", `/api/projects/${p1.id}/cards`, undefined, { token: otherToken })).error?.code === "FORBIDDEN",
+  );
+  check(
+    "남의 할 일 수정 차단",
+    (await call("PATCH", `/api/todos/${project.todos[0].id}`, { isCompleted: false }, { token: otherToken })).error?.code === "FORBIDDEN",
+  );
+  const otherList = await call("GET", "/api/projects", undefined, { token: otherToken });
   check("남의 프로젝트는 목록에도 없다", (otherList.data?.projects?.length ?? 0) === 0);
-  deviceId = mine;
+  const otherCal = await call("GET", "/api/calendar", undefined, { token: otherToken });
+  check("남의 완료 기록도 안 보인다", (otherCal.data?.days?.length ?? 0) === 0);
+  check(
+    "로그아웃",
+    (await call("POST", "/api/auth/logout", undefined, { token: otherToken })).data?.loggedOut === true,
+  );
 
   summary();
 }
