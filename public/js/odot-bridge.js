@@ -602,28 +602,26 @@ async function renderRealProjects() {
   try {
     ({ projects } = await odot.listProjects());
   } catch {
-    return; // 실패하면 프로토타입이 그린 화면을 그대로 둔다.
+    return; // 실패하면 프로토타입 화면을 그대로 둔다.
   }
 
-  const signal = el("#projectSignal");
-  const eyebrow = el("#projects > .eyebrow");
-  const title = el("#projects > h1");
-  if (signal) signal.textContent = `프로젝트 ${projects.length}개`;
-  if (eyebrow) eyebrow.textContent = "각 목표를 각자의 속도로";
-
-  if (projects.length === 0) {
-    if (title) title.innerHTML = "아직 시작한<br>프로젝트가 없어요.";
-    // 프로토타입의 빈 상태를 그대로 두되, 버튼만 새 프로젝트로 연결한다.
-    const find = el("#findGoal");
-    if (find) find.onclick = () => startNewProject();
+  // 프로젝트가 하나뿐이면 전환할 것이 없다 — 화면을 건드리지 않는다.
+  if (projects.length < 2) {
+    el("#odotProjectSwitch")?.remove();
     return;
   }
 
-  if (title) title.innerHTML = "어떤 걸<br>이어서 해볼까요?";
-  el("#projectLocked")?.setAttribute("hidden", "");
-  ready.hidden = false;
+  // 프로토타입이 #projectReady 안에 만들어 둔 것(아카이브·진행률·플랜 등)은
+  // 절대 건드리지 않는다. 세션 전환 목록만 뒤에 덧붙인다.
+  let block = el("#odotProjectSwitch");
+  if (!block) {
+    block = document.createElement("section");
+    block.id = "odotProjectSwitch";
+    ready.append(block);
+  }
 
-  ready.innerHTML =
+  block.innerHTML =
+    '<p class="eyebrow" style="margin-top:22px">다른 프로젝트로 옮기기</p>' +
     '<div class="odot-project-list">' +
     projects
       .map((p) => {
@@ -643,13 +641,11 @@ async function renderRealProjects() {
         </button>`;
       })
       .join("") +
-    "</div>" +
-    '<button class="odot-project-new" id="odotNewProject" type="button">+ 새 프로젝트 시작하기</button>';
+    "</div>";
 
-  ready.querySelectorAll("[data-project]").forEach((node) => {
+  block.querySelectorAll("[data-project]").forEach((node) => {
     node.onclick = () => void openSession(node.dataset.project);
   });
-  el("#odotNewProject").onclick = () => startNewProject();
 }
 
 /** 관심사 선택 화면이 곧 '새 프로젝트' 화면이다. */
